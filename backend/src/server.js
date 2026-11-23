@@ -1,22 +1,44 @@
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
-require('dotenv').config();
 
 const authRoutes = require('./routes/auth.routes');
 const lotesRoutes = require('./routes/lotes.routes');
 const finanzasRoutes = require('./routes/finanzas.routes');
 
 const app = express();
+const PORT = process.env.PORT || 4000;
+
+const allowedOrigins = [
+  process.env.FRONTEND_URL,
+  'http://localhost:5173',
+  'http://localhost:4173',
+  'http://localhost:3000'
+].filter(Boolean);
 
 const corsOptions = {
-  origin: process.env.FRONTEND_URL || '*',
-  methods: ['GET', 'POST', 'PUT', 'DELETE'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  origin: (origin, callback) => {
+    // Permite peticiones sin Origin (ej. Postman, curl, health checks)
+    if (!origin) return callback(null, true);
+
+    const esRender = origin.endsWith('.onrender.com');
+    const estaEnLista = allowedOrigins.includes(origin);
+
+    if (esRender || estaEnLista) {
+      return callback(null, true);
+    }
+
+    return callback(new Error(`Origen no permitido por CORS: ${origin}`));
+  },
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true
 };
 
 app.use(cors(corsOptions));
-app.use(express.json({ limit: '25mb' }));
+app.options('*', cors(corsOptions));
+
+app.use(express.json());
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
 app.get('/', (_req, res) => {
@@ -35,8 +57,11 @@ app.use('/api/auth', authRoutes);
 app.use('/api/lotes', lotesRoutes);
 app.use('/api/finanzas', finanzasRoutes);
 
-const PORT = process.env.PORT || 4000;
-app.listen(PORT, () => {
-  console.log(`Servidor AgroControl Pro ejecutándose en http://localhost:${PORT}`);
+app.use((err, _req, res, _next) => {
+  console.error(err);
+  res.status(err.status || 500).json({ error: err.message || 'Error interno del servidor' });
 });
 
+app.listen(PORT, () => {
+  console.log(`Servidor corriendo en puerto ${PORT}`);
+});
