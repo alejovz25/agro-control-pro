@@ -1,6 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
+const db = require('./config/db');
 
 const authRoutes = require('./routes/auth.routes');
 const lotesRoutes = require('./routes/lotes.routes');
@@ -18,16 +19,12 @@ const allowedOrigins = [
 
 const corsOptions = {
   origin: (origin, callback) => {
-    // Permite peticiones sin Origin (ej. Postman, curl, health checks)
     if (!origin) return callback(null, true);
-
     const esRender = origin.endsWith('.onrender.com');
     const estaEnLista = allowedOrigins.includes(origin);
-
     if (esRender || estaEnLista) {
       return callback(null, true);
     }
-
     return callback(new Error(`Origen no permitido por CORS: ${origin}`));
   },
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
@@ -49,8 +46,13 @@ app.get('/', (_req, res) => {
   });
 });
 
-app.get('/api/health', (_req, res) => {
-  res.json({ ok: true, servicio: 'AgroControl Pro API' });
+app.get('/api/health', async (_req, res) => {
+  try {
+    await db.query('SELECT 1');
+    res.json({ ok: true, servicio: 'AgroControl Pro API', db: 'conectada' });
+  } catch (err) {
+    res.status(500).json({ ok: false, servicio: 'AgroControl Pro API', db_error: err.message });
+  }
 });
 
 app.use('/api/auth', authRoutes);
@@ -62,6 +64,16 @@ app.use((err, _req, res, _next) => {
   res.status(err.status || 500).json({ error: err.message || 'Error interno del servidor' });
 });
 
-app.listen(PORT, () => {
-  console.log(`Servidor corriendo en puerto ${PORT}`);
-});
+db.inicializarBaseDeDatos()
+  .then(() => {
+    console.log('Base de datos inicializada correctamente');
+    app.listen(PORT, () => {
+      console.log(`Servidor corriendo en puerto ${PORT}`);
+    });
+  })
+  .catch((err) => {
+    console.error('Error inicializando base de datos:', err);
+    app.listen(PORT, () => {
+      console.log(`Servidor corriendo en puerto ${PORT} (revisar DATABASE_URL)`);
+    });
+  });
