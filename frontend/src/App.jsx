@@ -5,14 +5,17 @@ import { exportarReporteContableExcel } from './utils/exportExcel';
 import LoginView from './components/LoginView';
 import CrearTrabajadorModal from './components/CrearTrabajadorModal';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000';
+const RAW_API_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000';
+const API_URL = RAW_API_URL.replace(/\/+$/, '');
 
 export default function App() {
   const [token, setToken] = useState(() => localStorage.getItem('agro_token') || '');
   const [usuario, setUsuario] = useState(() => {
     try {
       const saved = localStorage.getItem('agro_usuario');
-      return saved ? JSON.parse(saved) : null;
+      if (!saved) return null;
+      const parsed = JSON.parse(saved);
+      return parsed && typeof parsed === 'object' ? parsed : null;
     } catch {
       return null;
     }
@@ -23,12 +26,10 @@ export default function App() {
   const [sincronizando, setSincronizando] = useState(false);
   const [mensajeEstado, setMensajeEstado] = useState('');
 
-  // Datos principales
   const [lotes, setLotes] = useState([]);
   const [gastos, setGastos] = useState([]);
   const [seguimientos, setSeguimientos] = useState([]);
 
-  // Formulario nuevo lote (solo ADMIN)
   const [nuevoLote, setNuevoLote] = useState({
     codigo: '',
     nombre: '',
@@ -38,7 +39,6 @@ export default function App() {
     fecha_inicio: new Date().toISOString().slice(0, 10)
   });
 
-  // Formulario seguimiento diario
   const [nuevoSeg, setNuevoSeg] = useState({
     lote_id: '',
     tipo_registro: 'LECHE_LITROS',
@@ -49,7 +49,6 @@ export default function App() {
     fecha_registro: new Date().toISOString().slice(0, 10)
   });
 
-  // Formulario gasto / factura (solo ADMIN)
   const [nuevoGasto, setNuevoGasto] = useState({
     lote_id: '',
     categoria: 'ALIMENTO',
@@ -58,6 +57,17 @@ export default function App() {
     fecha: new Date().toISOString().slice(0, 10),
     archivo: null
   });
+
+  useEffect(() => {
+    const handleOnline = () => setOnline(true);
+    const handleOffline = () => setOnline(false);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
 
   const cerrarSesion = useCallback(() => {
     localStorage.removeItem('agro_token');
@@ -81,7 +91,7 @@ export default function App() {
       setGastos(gastosLocal);
       setSeguimientos(segLocal);
     } catch {
-      // Si offlineDb usa otra estructura, evita bloquear la vista
+      // Evita bloquear la vista si IndexedDB aún no inicializa tablas
     }
   }, []);
 
@@ -98,10 +108,12 @@ export default function App() {
       }
       if (resLotes.ok) {
         const dataLotes = await resLotes.json();
-        setLotes(dataLotes);
-        if (db.lotes) {
-          await db.lotes.clear();
-          await db.lotes.bulkPut(dataLotes);
+        if (Array.isArray(dataLotes)) {
+          setLotes(dataLotes);
+          if (db.lotes) {
+            await db.lotes.clear();
+            await db.lotes.bulkPut(dataLotes);
+          }
         }
       }
 
@@ -109,10 +121,12 @@ export default function App() {
         const resGastos = await fetch(`${API_URL}/api/finanzas/gastos`, { headers });
         if (resGastos.ok) {
           const dataGastos = await resGastos.json();
-          setGastos(dataGastos);
-          if (db.gastos) {
-            await db.gastos.clear();
-            await db.gastos.bulkPut(dataGastos);
+          if (Array.isArray(dataGastos)) {
+            setGastos(dataGastos);
+            if (db.gastos) {
+              await db.gastos.clear();
+              await db.gastos.bulkPut(dataGastos);
+            }
           }
         }
       }
@@ -121,69 +135,6 @@ export default function App() {
     }
   }, [token, usuario?.rol, cerrarSesion]);
 
-  const handleSincronizarTodo = useCallback(async () => {
-    if (!navigator.onLine || !token) {
-      setMensajeEstado('Necesitas conexión a internet para sincronizar.');
-      return;
-    }
-
-    setSincronizando(true);
-    try {
-      const pendientesSeg = seguimientos.filter((s) => s.pendiente_sync);
-      const pendientesGastos = gastos.filter((g) => g.pendiente_sync);
-
-      if (pendientesSeg.length > 0) {
-        const resSeg = await fetch(`${API_URL}/api/lotes/sync`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`
-          },
-          body: JSON.stringify({ seguimientos: pendientesSeg })
-        });
-        if (!resSeg.ok) throw new Error('Error sincronizando seguimientos');
-      }
-
-      if (usuario?.rol === 'ADMIN' && pendientesGastos.length > 0) {
-        const resGastos = await fetch(`${API_URL}/api/finanzas/sync`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`
-          },
-          body: JSON.stringify({ gastos: pendientesGastos })
-        });
-        if (!resGastos.ok) throw new Error('Error sincronizando gastos');
-      }
-
-      if (pendientesSeg.length > 0 || pendientesGastos.length > 0) {
-        setSeguimientos((prev) => prev.map((item) => ({ ...item, pendiente_sync: false })));
-        setGastos((prev) => prev.map((item) => ({ ...item, pendiente_sync: false })));
-        await cargarDatosServidor();
-        setMensajeEstado('Sincronización completada con el servidor.');
-      }
-    } catch (err) {
-      setMensajeEstado(err.message);
-    } finally {
-      setSincronizando(false);
-    }
-  }, [token, usuario?.rol, seguimientos, gastos, cargarDatosServidor]);
-
-  useEffect(() => {
-    const handleOnline = () => {
-      setOnline(true);
-      handleSincronizarTodo();
-    };
-    const handleOffline = () => setOnline(false);
-
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('offline', handleOffline);
-    return () => {
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
-    };
-  }, [handleSincronizarTodo]);
-
   useEffect(() => {
     if (!token || !usuario) return;
     cargarDatosLocales();
@@ -191,11 +142,25 @@ export default function App() {
   }, [token, usuario, cargarDatosLocales, cargarDatosServidor]);
 
   const handleLoginSuccess = (data) => {
-    if (data.token) localStorage.setItem('agro_token', data.token);
-    if (data.usuario) localStorage.setItem('agro_usuario', JSON.stringify(data.usuario));
-    setToken(data.token);
-    setUsuario(data.usuario);
-    setMensajeEstado(`Bienvenido, ${data.usuario.nombre} (${data.usuario.rol})`);
+    const u = data?.usuario || data?.user || null;
+    if (!u) return;
+
+    const usuarioSeguro = {
+      id: u.id || '',
+      empresa_id: u.empresa_id || u.empresaId || '',
+      nombre: u.nombre || u.name || u.email || 'Usuario',
+      email: u.email || '',
+      rol: u.rol || u.role || 'ADMIN'
+    };
+
+    const nuevoToken = data?.token || localStorage.getItem('agro_token') || '';
+    if (nuevoToken) {
+      localStorage.setItem('agro_token', nuevoToken);
+      setToken(nuevoToken);
+    }
+    localStorage.setItem('agro_usuario', JSON.stringify(usuarioSeguro));
+    setUsuario(usuarioSeguro);
+    setMensajeEstado(`Bienvenido, ${usuarioSeguro.nombre} (${usuarioSeguro.rol})`);
   };
 
   const handleCrearLote = async (e) => {
@@ -226,12 +191,13 @@ export default function App() {
           body: JSON.stringify(lotePayload)
         });
         if (!res.ok) {
-          const errData = await res.json();
+          const errData = await res.json().catch(() => ({}));
           throw new Error(errData.error || 'No se pudo crear el lote');
         }
         const creado = await res.json();
-        setLotes((prev) => [creado, ...prev]);
-        if (db.lotes) await db.lotes.put(creado);
+        const loteFinal = creado?.id ? creado : lotePayload;
+        setLotes((prev) => [loteFinal, ...prev]);
+        if (db.lotes) await db.lotes.put(loteFinal);
       } else {
         setLotes((prev) => [lotePayload, ...prev]);
         if (db.lotes) await db.lotes.put(lotePayload);
@@ -306,12 +272,12 @@ export default function App() {
           body: formData
         });
         if (!res.ok) {
-          const errData = await res.json();
+          const errData = await res.json().catch(() => ({}));
           throw new Error(errData.error || 'Error al registrar gasto');
         }
         const creado = await res.json();
         setGastos((prev) => [creado, ...prev]);
-        if (db.gastos) await db.gastos.put(creado);
+        if (db.gastos && creado?.id) await db.gastos.put(creado);
       } else {
         const gastoOffline = {
           id: uuidv4(),
@@ -341,24 +307,71 @@ export default function App() {
     }
   };
 
+  const handleSincronizarTodo = async () => {
+    if (!online || !token) {
+      setMensajeEstado('Necesitas conexión a internet para sincronizar.');
+      return;
+    }
+
+    setSincronizando(true);
+    try {
+      const pendientesSeg = seguimientos.filter((s) => s.pendiente_sync);
+      const pendientesGastos = gastos.filter((g) => g.pendiente_sync);
+
+      if (pendientesSeg.length > 0) {
+        const resSeg = await fetch(`${API_URL}/api/lotes/sync`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`
+          },
+          body: JSON.stringify({ seguimientos: pendientesSeg })
+        });
+        if (!resSeg.ok) throw new Error('Error sincronizando seguimientos');
+      }
+
+      if (usuario?.rol === 'ADMIN' && pendientesGastos.length > 0) {
+        const resGastos = await fetch(`${API_URL}/api/finanzas/sync`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`
+          },
+          body: JSON.stringify({ gastos: pendientesGastos })
+        });
+        if (!resGastos.ok) throw new Error('Error sincronizando gastos');
+      }
+
+      setSeguimientos((prev) => prev.map((item) => ({ ...item, pendiente_sync: false })));
+      setGastos((prev) => prev.map((item) => ({ ...item, pendiente_sync: false })));
+      await cargarDatosServidor();
+      setMensajeEstado('Sincronización completada con el servidor.');
+    } catch (err) {
+      setMensajeEstado(err.message);
+    } finally {
+      setSincronizando(false);
+    }
+  };
+
   if (!token || !usuario) {
     return <LoginView onLoginSuccess={handleLoginSuccess} />;
   }
 
-  const esAdmin = usuario.rol === 'ADMIN';
+  const nombreUsuario = usuario?.nombre || usuario?.email || 'Usuario';
+  const rolUsuario = usuario?.rol || 'OPERARIO';
+  const esAdmin = rolUsuario === 'ADMIN';
   const totalPendientes =
     seguimientos.filter((s) => s.pendiente_sync).length +
     gastos.filter((g) => g.pendiente_sync).length;
 
   return (
     <div className="min-h-screen bg-slate-100 text-slate-800">
-      {/* Barra superior */}
       <header className="bg-emerald-900 text-white px-4 py-3 shadow">
         <div className="max-w-6xl mx-auto flex flex-wrap items-center justify-between gap-3">
           <div>
             <h1 className="text-lg font-bold tracking-tight">AgroControl Pro</h1>
             <p className="text-xs text-emerald-200">
-              {usuario.nombre} &bull; Rol: <span className="font-semibold">{usuario.rol}</span>
+              {nombreUsuario} &bull; Rol: <span className="font-semibold">{rolUsuario}</span>
             </p>
           </div>
 
@@ -396,7 +409,7 @@ export default function App() {
                   type="button"
                   onClick={() =>
                     exportarReporteContableExcel(
-                      `Empresa_${usuario.empresa_id?.slice(0, 8) || 'Agro'}`,
+                      `Empresa_${String(usuario?.empresa_id || 'Agro').slice(0, 8)}`,
                       lotes,
                       gastos,
                       seguimientos
@@ -434,7 +447,6 @@ export default function App() {
           </div>
         )}
 
-        {/* Tarjetas resumen */}
         <section className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div className="bg-white rounded-2xl p-4 shadow-sm border border-slate-200">
             <p className="text-xs text-slate-500">Lotes Activos</p>
@@ -454,9 +466,7 @@ export default function App() {
           )}
         </section>
 
-        {/* Formularios operativos */}
         <section className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Control diario (todos los roles) */}
           <form
             onSubmit={handleRegistrarSeguimiento}
             className="bg-white rounded-2xl p-5 shadow-sm border border-slate-200 space-y-3"
@@ -552,7 +562,6 @@ export default function App() {
             </button>
           </form>
 
-          {/* Solo ADMIN: Crear Lote o Registrar Gasto */}
           {esAdmin ? (
             <div className="space-y-4">
               <form
@@ -673,7 +682,7 @@ export default function App() {
             <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-200 flex flex-col justify-center">
               <h2 className="text-base font-bold text-slate-800 mb-1">Panel Operativo</h2>
               <p className="text-sm text-slate-600">
-                Tu cuenta tiene rol <span className="font-semibold">{usuario.rol}</span>. Puedes
+                Tu cuenta tiene rol <span className="font-semibold">{rolUsuario}</span>. Puedes
                 registrar controles diarios incluso sin conexión a internet y sincronizarlos cuando
                 vuelva la red.
               </p>
@@ -681,7 +690,6 @@ export default function App() {
           )}
         </section>
 
-        {/* Listado de lotes */}
         <section className="bg-white rounded-2xl p-5 shadow-sm border border-slate-200">
           <h2 className="text-base font-bold text-slate-800 mb-3">Lotes Registrados</h2>
           {lotes.length === 0 ? (
@@ -719,7 +727,9 @@ export default function App() {
         <CrearTrabajadorModal
           onClose={() => setMostrarModalTrabajador(false)}
           onCreado={(trabajador) =>
-            setMensajeEstado(`Trabajador ${trabajador.nombre} (${trabajador.rol}) creado.`)
+            setMensajeEstado(
+              `Trabajador ${trabajador?.nombre || 'registrado'} (${trabajador?.rol || 'OPERARIO'}) creado.`
+            )
           }
         />
       )}
