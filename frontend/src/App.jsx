@@ -81,7 +81,7 @@ export default function App() {
       setGastos(gastosLocal);
       setSeguimientos(segLocal);
     } catch {
-      // Si offlineDb tiene otro nombre de tabla, no interrumpe la UI
+      // Si offlineDb usa otra estructura, evita bloquear la vista
     }
   }, []);
 
@@ -655,67 +655,66 @@ export default function App() {
                 />
                 <button
                   type="submit"
-                  className="w-full
-                <button
-               type="submit"
-               className="w-full bg-emerald-700 hover:bg-emerald-800 text-white font-semibold py-2 rounded-lg text-sm"
-             >
-               Guardar Gasto
-             </button>
-           </form>
-         </div>
-       ) : (
-         <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-200 flex flex-col justify-center">
-           <h2 className="text-base font-bold text-slate-800 mb-1">Panel Operativo</h2>
-           <p className="text-sm text-slate-600">
-             Tu cuenta tiene rol <span className="font-semibold">{usuario.rol}</span>. Puedes
-             registrar controles diarios incluso sin conexión a internet y sincronizarlos cuando
-             vuelva la red.
-           </p>
-         </div>
-       )}
-     </section>
+                  className="w-full bg-emerald-700 hover:bg-emerald-800 text-white font-semibold py-2 rounded-lg text-sm"
+                >
+                  Guardar Gasto
+                </button>
+              </form>
+            </div>
+          ) : (
+            <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-200 flex flex-col justify-center">
+              <h2 className="text-base font-bold text-slate-800 mb-1">Panel Operativo</h2>
+              <p className="text-sm text-slate-600">
+                Tu cuenta tiene rol <span className="font-semibold">{usuario.rol}</span>. Puedes
+                registrar controles diarios incluso sin conexión a internet y sincronizarlos cuando
+                vuelva la red.
+              </p>
+            </div>
+          )}
+        </section>
 
-     {/* Listado de lotes */}
-     <section className="bg-white rounded-2xl p-5 shadow-sm border border-slate-200">
-       <h2 className="text-base font-bold text-slate-800 mb-3">Lotes Registrados</h2>
-       {lotes.length === 0 ? (
-         <p className="text-sm text-slate-500">No hay lotes registrados aún.</p>
-       ) : (
-         <div className="overflow-x-auto">
-           <table className="w-full text-sm text-left">
-             <thead className="border-b text-xs uppercase text-slate-500">
-               <tr>
-                 <th className="py-2 pr-4">Código</th>
-                 <th className="py-2 pr-4">Nombre</th>
-                 <th className="py-2 pr-4">Especie</th>
-                 <th className="py-2 pr-4">Cantidad</th>
-                 <th className="py-2">Estado</th>
-               </tr>
-             </thead>
-             <tbody className="divide-y">
-               {lotes.map((lote) => (
-                 <tr key={lote.id}>
-                   <td className="py-2.5 pr-4 font-medium">{lote.codigo}</td>
-                   <td className="py-2.5 pr-4">{lote.nombre}</td>
-                   <td className="py-2.5 pr-4">{lote.especie}</td>
-                   <td className="py-2.5 pr-4">{lote.cantidad_actual ?? lote.cantidad_inicial}</td>
-                   <td className="py-2.5">{lote.estado || 'ACTIVO'}</td>
-                 </tr>
-               ))}
-             </tbody>
-           </table>
-         </div>
-       )}
-     </section>
-   </main>
+        {/* Listado de lotes */}
+        <section className="bg-white rounded-2xl p-5 shadow-sm border border-slate-200">
+          <h2 className="text-base font-bold text-slate-800 mb-3">Lotes Registrados</h2>
+          {lotes.length === 0 ? (
+            <p className="text-sm text-slate-500">No hay lotes registrados aún.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm text-left">
+                <thead className="border-b text-xs uppercase text-slate-500">
+                  <tr>
+                    <th className="py-2 pr-4">Código</th>
+                    <th className="py-2 pr-4">Nombre</th>
+                    <th className="py-2 pr-4">Especie</th>
+                    <th className="py-2 pr-4">Cantidad</th>
+                    <th className="py-2">Estado</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {lotes.map((lote) => (
+                    <tr key={lote.id}>
+                      <td className="py-2.5 pr-4 font-medium">{lote.codigo}</td>
+                      <td className="py-2.5 pr-4">{lote.nombre}</td>
+                      <td className="py-2.5 pr-4">{lote.especie}</td>
+                      <td className="py-2.5 pr-4">{lote.cantidad_actual ?? lote.cantidad_inicial}</td>
+                      <td className="py-2.5">{lote.estado || 'ACTIVO'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      </main>
 
-   {mostrarModalTrabajador && esAdmin && (
-     <CrearTrabajadorModal
-       onClose={() => setMostrarModalTrabajador(false)}
-       onCreado={(trabajador) =>
-         setMensajeEstado(`Trabajador ${trabajador.nombre} (${trabajador.rol}) creado.`)
-       }
-     />
-   )}
- </div>
+      {mostrarModalTrabajador && esAdmin && (
+        <CrearTrabajadorModal
+          onClose={() => setMostrarModalTrabajador(false)}
+          onCreado={(trabajador) =>
+            setMensajeEstado(`Trabajador ${trabajador.nombre} (${trabajador.rol}) creado.`)
+          }
+        />
+      )}
+    </div>
+  );
+}
