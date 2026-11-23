@@ -40,9 +40,12 @@ router.post('/register-empresa', async (req, res) => {
   }
 
   const emailNormalizado = String(email).trim().toLowerCase();
+  let client;
 
   try {
-    const existe = await db.query('SELECT id FROM usuarios WHERE LOWER(email) = $1', [
+    client = await db.connect();
+
+    const existe = await client.query('SELECT id FROM usuarios WHERE LOWER(email) = $1', [
       emailNormalizado
     ]);
     if (existe.rows.length > 0) {
@@ -53,23 +56,23 @@ router.post('/register-empresa', async (req, res) => {
     const usuarioId = uuidv4();
     const passwordHash = await bcrypt.hash(password, 10);
 
-    await db.query('BEGIN');
+    await client.query('BEGIN');
 
-    const empresaRes = await db.query(
+    const empresaRes = await client.query(
       `INSERT INTO empresas (id, nombre, nit_rut, moneda)
        VALUES ($1, $2, $3, $4)
        RETURNING id, nombre, nit_rut, moneda`,
       [empresaId, String(nombre_empresa).trim(), String(nit_rut).trim(), moneda]
     );
 
-    const usuarioRes = await db.query(
+    const usuarioRes = await client.query(
       `INSERT INTO usuarios (id, empresa_id, nombre, email, password_hash, rol, activo)
        VALUES ($1, $2, $3, $4, $5, 'ADMIN', TRUE)
        RETURNING id, empresa_id, nombre, email, rol`,
       [usuarioId, empresaId, String(nombre_admin).trim(), emailNormalizado, passwordHash]
     );
 
-    await db.query('COMMIT');
+    await client.query('COMMIT');
 
     const usuario = usuarioRes.rows[0];
     const empresa = empresaRes.rows[0];
@@ -81,9 +84,17 @@ router.post('/register-empresa', async (req, res) => {
       empresa
     });
   } catch (error) {
-    await db.query('ROLLBACK').catch(() => {});
+    if (client) {
+      await client.query('ROLLBACK').catch(() => {});
+    }
     console.error('Error en /register-empresa:', error);
-    return res.status(500).json({ error: error.message || 'Error al registrar la empresa' });
+    return res.status(500).json({
+      error: error.detail || error.message || 'Error al registrar la empresa'
+    });
+  } finally {
+    if (client) {
+      client.release();
+    }
   }
 });
 
@@ -127,7 +138,7 @@ router.post('/login', async (req, res) => {
     return res.json({ token, usuario });
   } catch (error) {
     console.error('Error en /login:', error);
-    return res.status(500).json({ error: error.message || 'Error al iniciar sesión' });
+    return res.status(500).json({ error: error.detail || error.message || 'Error al iniciar sesión' });
   }
 });
 
@@ -167,7 +178,7 @@ router.post('/usuarios', verificarAcceso(['ADMIN']), async (req, res) => {
     return res.status(201).json(rows[0]);
   } catch (error) {
     console.error('Error en /usuarios:', error);
-    return res.status(500).json({ error: error.message || 'Error al crear trabajador' });
+    return res.status(500).json({ error: error.detail || error.message || 'Error al crear trabajador' });
   }
 });
 
