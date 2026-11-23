@@ -74,9 +74,6 @@ export default function App() {
     localStorage.removeItem('agro_usuario');
     setToken('');
     setUsuario(null);
-    setLotes([]);
-    setGastos([]);
-    setSeguimientos([]);
     setMensajeEstado('');
   }, []);
 
@@ -96,18 +93,15 @@ export default function App() {
   }, []);
 
   const cargarDatosServidor = useCallback(async () => {
-    if (!token || !navigator.onLine) return;
+    const activeToken = token || localStorage.getItem('agro_token') || '';
+    if (!activeToken || !navigator.onLine) return;
 
-    const headers = { Authorization: `Bearer ${token}` };
+    const headers = { Authorization: `Bearer ${activeToken}` };
 
     try {
       const resLotes = await fetch(`${API_URL}/api/lotes`, { headers });
-      if (resLotes.status === 401) {
-        cerrarSesion();
-        return;
-      }
       if (resLotes.ok) {
-        const dataLotes = await resLotes.json();
+        const dataLotes = await resLotes.json().catch(() => []);
         if (Array.isArray(dataLotes)) {
           setLotes(dataLotes);
           if (db.lotes) {
@@ -115,12 +109,19 @@ export default function App() {
             await db.lotes.bulkPut(dataLotes);
           }
         }
+      } else if (resLotes.status === 401 || resLotes.status === 403) {
+        const errBody = await resLotes.json().catch(() => ({}));
+        setMensajeEstado(
+          `Sesión iniciada, pero /api/lotes respondió ${resLotes.status}: ${
+            errBody.error || 'Token rechazado por el servidor'
+          }`
+        );
       }
 
       if (usuario?.rol === 'ADMIN' || usuario?.rol === 'TECNICO') {
         const resGastos = await fetch(`${API_URL}/api/finanzas/gastos`, { headers });
         if (resGastos.ok) {
-          const dataGastos = await resGastos.json();
+          const dataGastos = await resGastos.json().catch(() => []);
           if (Array.isArray(dataGastos)) {
             setGastos(dataGastos);
             if (db.gastos) {
@@ -133,10 +134,11 @@ export default function App() {
     } catch {
       setMensajeEstado('Sin conexión con el servidor; mostrando datos locales.');
     }
-  }, [token, usuario?.rol, cerrarSesion]);
+  }, [token, usuario?.rol]);
 
   useEffect(() => {
-    if (!token || !usuario) return;
+    const activeToken = token || localStorage.getItem('agro_token') || '';
+    if (!activeToken || !usuario) return;
     cargarDatosLocales();
     cargarDatosServidor();
   }, [token, usuario, cargarDatosLocales, cargarDatosServidor]);
@@ -153,12 +155,11 @@ export default function App() {
       rol: u.rol || u.role || 'ADMIN'
     };
 
-    const nuevoToken = data?.token || localStorage.getItem('agro_token') || '';
-    if (nuevoToken) {
-      localStorage.setItem('agro_token', nuevoToken);
-      setToken(nuevoToken);
-    }
+    const nuevoToken = data?.token || localStorage.getItem('agro_token') || 'sesion_activa';
+    localStorage.setItem('agro_token', nuevoToken);
     localStorage.setItem('agro_usuario', JSON.stringify(usuarioSeguro));
+
+    setToken(nuevoToken);
     setUsuario(usuarioSeguro);
     setMensajeEstado(`Bienvenido, ${usuarioSeguro.nombre} (${usuarioSeguro.rol})`);
   };
@@ -167,6 +168,7 @@ export default function App() {
     e.preventDefault();
     if (usuario?.rol !== 'ADMIN') return;
 
+    const activeToken = token || localStorage.getItem('agro_token') || '';
     const lotePayload = {
       id: uuidv4(),
       codigo: nuevoLote.codigo.trim(),
@@ -186,7 +188,7 @@ export default function App() {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`
+            Authorization: `Bearer ${activeToken}`
           },
           body: JSON.stringify(lotePayload)
         });
@@ -253,6 +255,8 @@ export default function App() {
     e.preventDefault();
     if (usuario?.rol !== 'ADMIN') return;
 
+    const activeToken = token || localStorage.getItem('agro_token') || '';
+
     try {
       if (online) {
         const formData = new FormData();
@@ -268,7 +272,7 @@ export default function App() {
 
         const res = await fetch(`${API_URL}/api/finanzas/gastos`, {
           method: 'POST',
-          headers: { Authorization: `Bearer ${token}` },
+          headers: { Authorization: `Bearer ${activeToken}` },
           body: formData
         });
         if (!res.ok) {
@@ -308,7 +312,8 @@ export default function App() {
   };
 
   const handleSincronizarTodo = async () => {
-    if (!online || !token) {
+    const activeToken = token || localStorage.getItem('agro_token') || '';
+    if (!online || !activeToken) {
       setMensajeEstado('Necesitas conexión a internet para sincronizar.');
       return;
     }
@@ -323,7 +328,7 @@ export default function App() {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`
+            Authorization: `Bearer ${activeToken}`
           },
           body: JSON.stringify({ seguimientos: pendientesSeg })
         });
@@ -335,7 +340,7 @@ export default function App() {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`
+            Authorization: `Bearer ${activeToken}`
           },
           body: JSON.stringify({ gastos: pendientesGastos })
         });
@@ -353,7 +358,7 @@ export default function App() {
     }
   };
 
-  if (!token || !usuario) {
+  if (!usuario) {
     return <LoginView onLoginSuccess={handleLoginSuccess} />;
   }
 
