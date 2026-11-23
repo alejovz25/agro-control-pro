@@ -1,13 +1,13 @@
 import React, { useState } from 'react';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000';
+const RAW_API_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000';
+const API_URL = RAW_API_URL.replace(/\/+$/, '');
 
 export default function LoginView({ onLoginSuccess }) {
   const [modo, setModo] = useState('login'); // 'login' | 'register'
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
 
-  // Campos para registrar nueva empresa + primer ADMIN
   const [nombreEmpresa, setNombreEmpresa] = useState('');
   const [nitRut, setNitRut] = useState('');
   const [moneda, setMoneda] = useState('COP');
@@ -43,10 +43,10 @@ export default function LoginView({ onLoginSuccess }) {
         body: JSON.stringify(payload)
       });
 
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
 
       if (!res.ok) {
-        throw new Error(data.error || 'No fue posible completar la solicitud');
+        throw new Error(data.error || `Error ${res.status} al comunicarse con el servidor`);
       }
 
       if (data.token) {
@@ -58,7 +58,13 @@ export default function LoginView({ onLoginSuccess }) {
 
       onLoginSuccess(data);
     } catch (err) {
-      setError(err.message || 'Error de conexión con el servidor');
+      if (err.name === 'TypeError' && err.message.includes('Failed to fetch')) {
+        setError(
+          `No se pudo conectar con ${API_URL}. Verifica que el backend esté activo, que CORS permita este dominio y que VITE_API_URL esté bien configurado.`
+        );
+      } else {
+        setError(err.message || 'Error al procesar la solicitud');
+      }
     } finally {
       setCargando(false);
     }
@@ -212,10 +218,6 @@ export default function LoginView({ onLoginSuccess }) {
                 : 'Crear Empresa y Cuenta Admin'}
           </button>
         </form>
-
-        <p className="text-xs text-slate-500 text-center mt-5">
-          ¿Eres trabajador? Inicia sesión con el correo y contraseña asignados por tu administrador.
-        </p>
       </div>
     </div>
   );
