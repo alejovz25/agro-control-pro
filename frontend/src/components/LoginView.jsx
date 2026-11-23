@@ -3,6 +3,19 @@ import React, { useState } from 'react';
 const RAW_API_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000';
 const API_URL = RAW_API_URL.replace(/\/+$/, '');
 
+function normalizarUsuario(data, fallbackEmail = '') {
+  const raw = data?.usuario || data?.user || (data?.nombre || data?.email ? data : null);
+  if (!raw) return null;
+
+  return {
+    id: raw.id || '',
+    empresa_id: raw.empresa_id || raw.empresaId || '',
+    nombre: raw.nombre || raw.name || fallbackEmail || 'Usuario',
+    email: raw.email || fallbackEmail,
+    rol: raw.rol || raw.role || 'ADMIN'
+  };
+}
+
 export default function LoginView({ onLoginSuccess }) {
   const [modo, setModo] = useState('login'); // 'login' | 'register'
   const [email, setEmail] = useState('');
@@ -49,14 +62,25 @@ export default function LoginView({ onLoginSuccess }) {
         throw new Error(data.error || `Error ${res.status} al comunicarse con el servidor`);
       }
 
+      const usuarioNormalizado = normalizarUsuario(
+        data,
+        modo === 'register' ? nombreAdmin.trim() || email.trim() : email.trim()
+      );
+
+      if (!usuarioNormalizado) {
+        throw new Error('La respuesta del servidor no incluyó los datos del usuario.');
+      }
+
       if (data.token) {
         localStorage.setItem('agro_token', data.token);
       }
-      if (data.usuario) {
-        localStorage.setItem('agro_usuario', JSON.stringify(data.usuario));
-      }
+      localStorage.setItem('agro_usuario', JSON.stringify(usuarioNormalizado));
 
-      onLoginSuccess(data);
+      onLoginSuccess({
+        ...data,
+        token: data.token || localStorage.getItem('agro_token') || '',
+        usuario: usuarioNormalizado
+      });
     } catch (err) {
       if (err.name === 'TypeError' && err.message.includes('Failed to fetch')) {
         setError(
@@ -218,6 +242,10 @@ export default function LoginView({ onLoginSuccess }) {
                 : 'Crear Empresa y Cuenta Admin'}
           </button>
         </form>
+
+        <p className="text-xs text-slate-500 text-center mt-5">
+          ¿Eres trabajador? Inicia sesión con el correo y contraseña asignados por tu administrador.
+        </p>
       </div>
     </div>
   );
