@@ -19,6 +19,14 @@ app.use(cors(corsOptions));
 app.use(express.json({ limit: '25mb' }));
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
+app.get('/', (_req, res) => {
+  res.json({
+    ok: true,
+    proyecto: 'AgroControl Pro API',
+    endpoints: ['/api/health', '/api/auth', '/api/lotes', '/api/finanzas']
+  });
+});
+
 app.get('/api/health', (_req, res) => {
   res.json({ ok: true, servicio: 'AgroControl Pro API' });
 });
