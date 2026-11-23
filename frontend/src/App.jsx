@@ -8,11 +8,35 @@ import CrearTrabajadorModal from './components/CrearTrabajadorModal';
 const RAW_API_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000';
 const API_URL = RAW_API_URL.replace(/\/+$/, '');
 
+function leerSeguro(clave) {
+  try {
+    return localStorage.getItem(clave) || '';
+  } catch {
+    return '';
+  }
+}
+
+function guardarSeguro(clave, valor) {
+  try {
+    localStorage.setItem(clave, valor);
+  } catch {
+    // Ignora restricciones del navegador
+  }
+}
+
+function borrarSeguro(clave) {
+  try {
+    localStorage.removeItem(clave);
+  } catch {
+    // Ignora restricciones del navegador
+  }
+}
+
 export default function App() {
-  const [token, setToken] = useState(() => localStorage.getItem('agro_token') || '');
+  const [token, setToken] = useState(() => leerSeguro('agro_token'));
   const [usuario, setUsuario] = useState(() => {
     try {
-      const saved = localStorage.getItem('agro_usuario');
+      const saved = leerSeguro('agro_usuario');
       if (!saved) return null;
       const parsed = JSON.parse(saved);
       return parsed && typeof parsed === 'object' ? parsed : null;
@@ -70,10 +94,13 @@ export default function App() {
   }, []);
 
   const cerrarSesion = useCallback(() => {
-    localStorage.removeItem('agro_token');
-    localStorage.removeItem('agro_usuario');
+    borrarSeguro('agro_token');
+    borrarSeguro('agro_usuario');
     setToken('');
     setUsuario(null);
+    setLotes([]);
+    setGastos([]);
+    setSeguimientos([]);
     setMensajeEstado('');
   }, []);
 
@@ -84,19 +111,18 @@ export default function App() {
         db.gastos ? db.gastos.toArray() : [],
         db.seguimientos ? db.seguimientos.toArray() : []
       ]);
-      setLotes(lotesLocal);
-      setGastos(gastosLocal);
-      setSeguimientos(segLocal);
+      setLotes(Array.isArray(lotesLocal) ? lotesLocal : []);
+      setGastos(Array.isArray(gastosLocal) ? gastosLocal : []);
+      setSeguimientos(Array.isArray(segLocal) ? segLocal : []);
     } catch {
-      // Evita bloquear la vista si IndexedDB aún no inicializa tablas
+      // Evita bloquear la vista si IndexedDB no está disponible
     }
   }, []);
 
   const cargarDatosServidor = useCallback(async () => {
-    const activeToken = token || localStorage.getItem('agro_token') || '';
-    if (!activeToken || !navigator.onLine) return;
+    if (!token || !navigator.onLine) return;
 
-    const headers = { Authorization: `Bearer ${activeToken}` };
+    const headers = { Authorization: `Bearer ${token}` };
 
     try {
       const resLotes = await fetch(`${API_URL}/api/lotes`, { headers });
@@ -109,13 +135,9 @@ export default function App() {
             await db.lotes.bulkPut(dataLotes);
           }
         }
-      } else if (resLotes.status === 401 || resLotes.status === 403) {
-        const errBody = await resLotes.json().catch(() => ({}));
-        setMensajeEstado(
-          `Sesión iniciada, pero /api/lotes respondió ${resLotes.status}: ${
-            errBody.error || 'Token rechazado por el servidor'
-          }`
-        );
+      } else if (resLotes.status === 401) {
+        setMensajeEstado('La sesión expiró o el token no fue aceptado por el servidor.');
+        return;
       }
 
       if (usuario?.rol === 'ADMIN' || usuario?.rol === 'TECNICO') {
@@ -137,11 +159,10 @@ export default function App() {
   }, [token, usuario?.rol]);
 
   useEffect(() => {
-    const activeToken = token || localStorage.getItem('agro_token') || '';
-    if (!activeToken || !usuario) return;
+    if (!usuario) return;
     cargarDatosLocales();
     cargarDatosServidor();
-  }, [token, usuario, cargarDatosLocales, cargarDatosServidor]);
+  }, [usuario, cargarDatosLocales, cargarDatosServidor]);
 
   const handleLoginSuccess = (data) => {
     const u = data?.usuario || data?.user || null;
@@ -152,12 +173,12 @@ export default function App() {
       empresa_id: u.empresa_id || u.empresaId || '',
       nombre: u.nombre || u.name || u.email || 'Usuario',
       email: u.email || '',
-      rol: u.rol || u.role || 'ADMIN'
+      rol: String(u.rol || u.role || 'ADMIN').toUpperCase()
     };
 
-    const nuevoToken = data?.token || localStorage.getItem('agro_token') || 'sesion_activa';
-    localStorage.setItem('agro_token', nuevoToken);
-    localStorage.setItem('agro_usuario', JSON.stringify(usuarioSeguro));
+    const nuevoToken = data?.token || leerSeguro('agro_token') || 'sesion_activa';
+    guardarSeguro('agro_token', nuevoToken);
+    guardarSeguro('agro_usuario', JSON.stringify(usuarioSeguro));
 
     setToken(nuevoToken);
     setUsuario(usuarioSeguro);
@@ -168,7 +189,6 @@ export default function App() {
     e.preventDefault();
     if (usuario?.rol !== 'ADMIN') return;
 
-    const activeToken = token || localStorage.getItem('agro_token') || '';
     const lotePayload = {
       id: uuidv4(),
       codigo: nuevoLote.codigo.trim(),
@@ -188,7 +208,7 @@ export default function App() {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            Authorization: `Bearer ${activeToken}`
+            Authorization: `Bearer ${token}`
           },
           body: JSON.stringify(lotePayload)
         });
@@ -196,7 +216,7 @@ export default function App() {
           const errData = await res.json().catch(() => ({}));
           throw new Error(errData.error || 'No se pudo crear el lote');
         }
-        const creado = await res.json();
+        const creado = await res.json().catch(() => ({}));
         const loteFinal = creado?.id ? creado : lotePayload;
         setLotes((prev) => [loteFinal, ...prev]);
         if (db.lotes) await db.lotes.put(loteFinal);
@@ -255,8 +275,6 @@ export default function App() {
     e.preventDefault();
     if (usuario?.rol !== 'ADMIN') return;
 
-    const activeToken = token || localStorage.getItem('agro_token') || '';
-
     try {
       if (online) {
         const formData = new FormData();
@@ -272,14 +290,14 @@ export default function App() {
 
         const res = await fetch(`${API_URL}/api/finanzas/gastos`, {
           method: 'POST',
-          headers: { Authorization: `Bearer ${activeToken}` },
+          headers: { Authorization: `Bearer ${token}` },
           body: formData
         });
         if (!res.ok) {
           const errData = await res.json().catch(() => ({}));
           throw new Error(errData.error || 'Error al registrar gasto');
         }
-        const creado = await res.json();
+        const creado = await res.json().catch(() => ({}));
         setGastos((prev) => [creado, ...prev]);
         if (db.gastos && creado?.id) await db.gastos.put(creado);
       } else {
@@ -312,8 +330,7 @@ export default function App() {
   };
 
   const handleSincronizarTodo = async () => {
-    const activeToken = token || localStorage.getItem('agro_token') || '';
-    if (!online || !activeToken) {
+    if (!online || !token) {
       setMensajeEstado('Necesitas conexión a internet para sincronizar.');
       return;
     }
@@ -328,7 +345,7 @@ export default function App() {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            Authorization: `Bearer ${activeToken}`
+            Authorization: `Bearer ${token}`
           },
           body: JSON.stringify({ seguimientos: pendientesSeg })
         });
@@ -340,7 +357,7 @@ export default function App() {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            Authorization: `Bearer ${activeToken}`
+            Authorization: `Bearer ${token}`
           },
           body: JSON.stringify({ gastos: pendientesGastos })
         });
