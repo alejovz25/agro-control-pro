@@ -1,17 +1,28 @@
 const { Pool } = require('pg');
 
-const isProduction = process.env.NODE_ENV === 'production';
+const connectionString = process.env.DATABASE_URL;
+
+if (!connectionString) {
+  console.error('ERROR: La variable de entorno DATABASE_URL no está definida.');
+}
+
+const useSsl =
+  Boolean(connectionString) &&
+  (process.env.NODE_ENV === 'production' ||
+    connectionString.includes('render.com') ||
+    connectionString.includes('sslmode=require') ||
+    !connectionString.includes('localhost'));
 
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: process.env.DATABASE_URL && isProduction
-    ? { rejectUnauthorized: false }
-    : process.env.DATABASE_URL?.includes('render.com')
-      ? { rejectUnauthorized: false }
-      : false
+  connectionString,
+  ssl: useSsl ? { rejectUnauthorized: false } : false
 });
 
 async function inicializarBaseDeDatos() {
+  if (!connectionString) {
+    throw new Error('Falta configurar DATABASE_URL en las variables de entorno');
+  }
+
   const sql = `
     CREATE TABLE IF NOT EXISTS empresas (
       id UUID PRIMARY KEY,
