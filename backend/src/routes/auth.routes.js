@@ -22,7 +22,6 @@ function firmarToken(usuario) {
   );
 }
 
-// Registrar empresa + primer usuario ADMIN
 router.post('/register-empresa', async (req, res) => {
   const {
     nombre_empresa,
@@ -98,7 +97,6 @@ router.post('/register-empresa', async (req, res) => {
   }
 });
 
-// Iniciar sesión (ADMIN, TECNICO, OPERARIO)
 router.post('/login', async (req, res) => {
   const { email, password } = req.body;
 
@@ -142,7 +140,6 @@ router.post('/login', async (req, res) => {
   }
 });
 
-// Crear trabajador dentro de la empresa del ADMIN
 router.post('/usuarios', verificarAcceso(['ADMIN']), async (req, res) => {
   const { nombre, email, password, rol = 'OPERARIO' } = req.body;
   const rolesPermitidos = ['ADMIN', 'TECNICO', 'OPERARIO'];
