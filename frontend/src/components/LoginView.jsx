@@ -3,16 +3,31 @@ import React, { useState } from 'react';
 const RAW_API_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000';
 const API_URL = RAW_API_URL.replace(/\/+$/, '');
 
-function normalizarUsuario(data, fallbackEmail = '') {
-  const raw = data?.usuario || data?.user || (data?.nombre || data?.email ? data : null);
-  if (!raw) return null;
+function guardarSeguro(clave, valor) {
+  try {
+    localStorage.setItem(clave, valor);
+  } catch {
+    // Ignora restricciones de almacenamiento del navegador
+  }
+}
 
+function normalizarUsuario(data, fallbackEmail = '', fallbackNombre = '') {
+  const raw =
+    data?.usuario ||
+    data?.user ||
+    data?.data?.usuario ||
+    data?.data?.user ||
+    (data?.nombre || data?.email ? data : null);
+
+  if (!raw && !fallbackEmail) return null;
+
+  const fuente = raw || {};
   return {
-    id: raw.id || '',
-    empresa_id: raw.empresa_id || raw.empresaId || '',
-    nombre: raw.nombre || raw.name || fallbackEmail || 'Usuario',
-    email: raw.email || fallbackEmail,
-    rol: raw.rol || raw.role || 'ADMIN'
+    id: fuente.id || fuente.userId || '',
+    empresa_id: fuente.empresa_id || fuente.empresaId || data?.empresa?.id || '',
+    nombre: fuente.nombre || fuente.name || fallbackNombre || fallbackEmail || 'Usuario',
+    email: fuente.email || fallbackEmail,
+    rol: String(fuente.rol || fuente.role || 'ADMIN').toUpperCase()
   };
 }
 
@@ -38,15 +53,18 @@ export default function LoginView({ onLoginSuccess }) {
       const endpoint =
         modo === 'login' ? `${API_URL}/api/auth/login` : `${API_URL}/api/auth/register-empresa`;
 
+      const emailLimpio = email.trim();
+      const nombreAdminLimpio = nombreAdmin.trim();
+
       const payload =
         modo === 'login'
-          ? { email: email.trim(), password }
+          ? { email: emailLimpio, password }
           : {
               nombre_empresa: nombreEmpresa.trim(),
               nit_rut: nitRut.trim(),
               moneda,
-              nombre_admin: nombreAdmin.trim(),
-              email: email.trim(),
+              nombre_admin: nombreAdminLimpio,
+              email: emailLimpio,
               password
             };
 
@@ -62,23 +80,20 @@ export default function LoginView({ onLoginSuccess }) {
         throw new Error(data.error || `Error ${res.status} al comunicarse con el servidor`);
       }
 
-      const usuarioNormalizado = normalizarUsuario(
-        data,
-        modo === 'register' ? nombreAdmin.trim() || email.trim() : email.trim()
-      );
-
+      const usuarioNormalizado = normalizarUsuario(data, emailLimpio, nombreAdminLimpio);
       if (!usuarioNormalizado) {
         throw new Error('La respuesta del servidor no incluyó los datos del usuario.');
       }
 
-      if (data.token) {
-        localStorage.setItem('agro_token', data.token);
+      const tokenRecibido = data.token || data.accessToken || data.jwt || '';
+      if (tokenRecibido) {
+        guardarSeguro('agro_token', tokenRecibido);
       }
-      localStorage.setItem('agro_usuario', JSON.stringify(usuarioNormalizado));
+      guardarSeguro('agro_usuario', JSON.stringify(usuarioNormalizado));
 
       onLoginSuccess({
         ...data,
-        token: data.token || localStorage.getItem('agro_token') || '',
+        token: tokenRecibido,
         usuario: usuarioNormalizado
       });
     } catch (err) {
