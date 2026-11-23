@@ -59,15 +59,15 @@ export default function App() {
     archivo: null
   });
 
-  useEffect(() => {
-    const handleOnline = () => setOnline(true);
-    const handleOffline = () => setOnline(false);
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('offline', handleOffline);
-    return () => {
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
-    };
+  const cerrarSesion = useCallback(() => {
+    localStorage.removeItem('agro_token');
+    localStorage.removeItem('agro_usuario');
+    setToken('');
+    setUsuario(null);
+    setLotes([]);
+    setGastos([]);
+    setSeguimientos([]);
+    setMensajeEstado('');
   }, []);
 
   const cargarDatosLocales = useCallback(async () => {
@@ -119,7 +119,70 @@ export default function App() {
     } catch {
       setMensajeEstado('Sin conexión con el servidor; mostrando datos locales.');
     }
-  }, [token, usuario?.rol]);
+  }, [token, usuario?.rol, cerrarSesion]);
+
+  const handleSincronizarTodo = useCallback(async () => {
+    if (!navigator.onLine || !token) {
+      setMensajeEstado('Necesitas conexión a internet para sincronizar.');
+      return;
+    }
+
+    setSincronizando(true);
+    try {
+      const pendientesSeg = seguimientos.filter((s) => s.pendiente_sync);
+      const pendientesGastos = gastos.filter((g) => g.pendiente_sync);
+
+      if (pendientesSeg.length > 0) {
+        const resSeg = await fetch(`${API_URL}/api/lotes/sync`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`
+          },
+          body: JSON.stringify({ seguimientos: pendientesSeg })
+        });
+        if (!resSeg.ok) throw new Error('Error sincronizando seguimientos');
+      }
+
+      if (usuario?.rol === 'ADMIN' && pendientesGastos.length > 0) {
+        const resGastos = await fetch(`${API_URL}/api/finanzas/sync`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`
+          },
+          body: JSON.stringify({ gastos: pendientesGastos })
+        });
+        if (!resGastos.ok) throw new Error('Error sincronizando gastos');
+      }
+
+      if (pendientesSeg.length > 0 || pendientesGastos.length > 0) {
+        setSeguimientos((prev) => prev.map((item) => ({ ...item, pendiente_sync: false })));
+        setGastos((prev) => prev.map((item) => ({ ...item, pendiente_sync: false })));
+        await cargarDatosServidor();
+        setMensajeEstado('Sincronización completada con el servidor.');
+      }
+    } catch (err) {
+      setMensajeEstado(err.message);
+    } finally {
+      setSincronizando(false);
+    }
+  }, [token, usuario?.rol, seguimientos, gastos, cargarDatosServidor]);
+
+  useEffect(() => {
+    const handleOnline = () => {
+      setOnline(true);
+      handleSincronizarTodo();
+    };
+    const handleOffline = () => setOnline(false);
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, [handleSincronizarTodo]);
 
   useEffect(() => {
     if (!token || !usuario) return;
@@ -128,20 +191,11 @@ export default function App() {
   }, [token, usuario, cargarDatosLocales, cargarDatosServidor]);
 
   const handleLoginSuccess = (data) => {
+    if (data.token) localStorage.setItem('agro_token', data.token);
+    if (data.usuario) localStorage.setItem('agro_usuario', JSON.stringify(data.usuario));
     setToken(data.token);
     setUsuario(data.usuario);
     setMensajeEstado(`Bienvenido, ${data.usuario.nombre} (${data.usuario.rol})`);
-  };
-
-  const cerrarSesion = () => {
-    localStorage.removeItem('agro_token');
-    localStorage.removeItem('agro_usuario');
-    setToken('');
-    setUsuario(null);
-    setLotes([]);
-    setGastos([]);
-    setSeguimientos([]);
-    setMensajeEstado('');
   };
 
   const handleCrearLote = async (e) => {
@@ -284,52 +338,6 @@ export default function App() {
       setMensajeEstado('Movimiento contable registrado.');
     } catch (err) {
       setMensajeEstado(err.message);
-    }
-  };
-
-  const handleSincronizarTodo = async () => {
-    if (!online || !token) {
-      setMensajeEstado('Necesitas conexión a internet para sincronizar.');
-      return;
-    }
-
-    setSincronizando(true);
-    try {
-      const pendientesSeg = seguimientos.filter((s) => s.pendiente_sync);
-      const pendientesGastos = gastos.filter((g) => g.pendiente_sync);
-
-      if (pendientesSeg.length > 0) {
-        const resSeg = await fetch(`${API_URL}/api/lotes/sync`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`
-          },
-          body: JSON.stringify({ seguimientos: pendientesSeg })
-        });
-        if (!resSeg.ok) throw new Error('Error sincronizando seguimientos');
-      }
-
-      if (usuario?.rol === 'ADMIN' && pendientesGastos.length > 0) {
-        const resGastos = await fetch(`${API_URL}/api/finanzas/sync`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`
-          },
-          body: JSON.stringify({ gastos: pendientesGastos })
-        });
-        if (!resGastos.ok) throw new Error('Error sincronizando gastos');
-      }
-
-      setSeguimientos((prev) => prev.map((item) => ({ ...item, pendiente_sync: false })));
-      setGastos((prev) => prev.map((item) => ({ ...item, pendiente_sync: false })));
-      await cargarDatosServidor();
-      setMensajeEstado('Sincronización completada con el servidor.');
-    } catch (err) {
-      setMensajeEstado(err.message);
-    } finally {
-      setSincronizando(false);
     }
   };
 
@@ -717,26 +725,4 @@ export default function App() {
       )}
     </div>
   );
-}
-export default function App() {
-  const [sesion, setSesion] = useState(() => {
-    const token = localStorage.getItem('agro_token');
-    return token ? { token } : null;
-  });
-
-  useEffect(() => {
-    const handleOnline = () => {
-      const token = localStorage.getItem('agro_token');
-      if (token) sincronizarConServidor('http://localhost:4000', token);
-    };
-
-    window.addEventListener('online', handleOnline);
-    return () => window.removeEventListener('online', handleOnline);
-  }, []);
-
-  if (!sesion) {
-    return <AuthForm onAuthSuccess={(data) => setSesion(data)} />;
-  }
-
-  return <DashboardPecuario />;
 }
