@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000';
+const RAW_API_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000';
+const API_URL = RAW_API_URL.replace(/\/+$/, '');
 
 export default function CrearTrabajadorModal({ onClose, onCreado }) {
   const [nombre, setNombre] = useState('');
@@ -33,17 +34,21 @@ export default function CrearTrabajadorModal({ onClose, onCreado }) {
         })
       });
 
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         throw new Error(data.error || 'No se pudo crear el trabajador');
       }
 
-      setMensaje(`Usuario ${data.nombre} (${data.rol}) creado correctamente.`);
+      const creado = data?.usuario || data || {};
+      const nombreCreado = creado.nombre || nombre.trim();
+      const rolCreado = creado.rol || rol;
+
+      setMensaje(`Usuario ${nombreCreado} (${rolCreado}) creado correctamente.`);
       setNombre('');
       setEmail('');
       setPassword('');
       setRol('OPERARIO');
-      if (onCreado) onCreado(data);
+      if (onCreado) onCreado({ ...creado, nombre: nombreCreado, rol: rolCreado });
     } catch (err) {
       setError(err.message);
     } finally {
