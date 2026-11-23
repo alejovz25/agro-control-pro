@@ -1,3 +1,4 @@
+const router = express.Router();
 const jwt = require('jsonwebtoken');
 const JWT_SECRET = process.env.JWT_SECRET || 'clave_secreta_agrocontrol_2026';
 
@@ -24,5 +25,4 @@ function verificarAcceso(rolesPermitidos = []) {
     }
   };
 }
-
-module.exports = { verificarAcceso, JWT_SECRET };
+module.exports = router;
