@@ -3,12 +3,19 @@ const cors = require('cors');
 const path = require('path');
 require('dotenv').config();
 
+const authRoutes = require('./routes/auth.routes');
 const lotesRoutes = require('./routes/lotes.routes');
 const finanzasRoutes = require('./routes/finanzas.routes');
 
 const app = express();
 
-app.use(cors());
+const corsOptions = {
+  origin: process.env.FRONTEND_URL || '*',
+  methods: ['GET', 'POST', 'PUT', 'DELETE'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+};
+
+app.use(cors(corsOptions));
 app.use(express.json({ limit: '25mb' }));
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
