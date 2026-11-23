@@ -718,3 +718,25 @@ export default function App() {
     </div>
   );
 }
+export default function App() {
+  const [sesion, setSesion] = useState(() => {
+    const token = localStorage.getItem('agro_token');
+    return token ? { token } : null;
+  });
+
+  useEffect(() => {
+    const handleOnline = () => {
+      const token = localStorage.getItem('agro_token');
+      if (token) sincronizarConServidor('http://localhost:4000', token);
+    };
+
+    window.addEventListener('online', handleOnline);
+    return () => window.removeEventListener('online', handleOnline);
+  }, []);
+
+  if (!sesion) {
+    return <AuthForm onAuthSuccess={(data) => setSesion(data)} />;
+  }
+
+  return <DashboardPecuario />;
+}
