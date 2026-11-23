@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 
-const API_URL = import.meta.env.VITE_API_URL || 'https://agro-control-pro-1.onrender.com';
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000';
 
 export default function LoginView({ onLoginSuccess }) {
   const [modo, setModo] = useState('login'); // 'login' | 'register'
