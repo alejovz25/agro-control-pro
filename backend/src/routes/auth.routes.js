@@ -1,3 +1,5 @@
+const router = express.Router(
+
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
@@ -5,7 +7,7 @@ const { v4: uuidv4 } = require('uuid');
 const db = require('../config/db');
 const { JWT_SECRET, verificarAcceso } = require('../middlewares/auth');
 
-const router = express.Router();
+
 
 // Registrar nueva empresa y su primer usuario ADMIN
 router.post('/register-empresa', async (req, res) => {
