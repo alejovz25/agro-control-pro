@@ -47,7 +47,7 @@ async function inicializarBaseDeDatos() {
       especie VARCHAR(80) NOT NULL,
       cantidad_inicial INTEGER NOT NULL DEFAULT 0,
       cantidad_actual INTEGER NOT NULL DEFAULT 0,
-      peso_inicial_kg NUMERIC(12, 2) NOT NULL DEFAULT 0,
+      peso_inicial_animal_kg NUMERIC(12, 2) NOT NULL DEFAULT 0,
       peso_final_kg NUMERIC(12, 2) NOT NULL DEFAULT 0,
       costo_compra_total NUMERIC(14, 2) NOT NULL DEFAULT 0,
       valor_venta_total NUMERIC(14, 2) NOT NULL DEFAULT 0,
@@ -56,7 +56,7 @@ async function inicializarBaseDeDatos() {
       creado_en TIMESTAMP WITH TIME ZONE DEFAULT NOW()
     );
 
-    ALTER TABLE lotes ADD COLUMN IF NOT EXISTS peso_inicial_kg NUMERIC(12, 2) NOT NULL DEFAULT 0;
+    ALTER TABLE lotes ADD COLUMN IF NOT EXISTS peso_inicial_animal_kg NUMERIC(12, 2) NOT NULL DEFAULT 0;
     ALTER TABLE lotes ADD COLUMN IF NOT EXISTS peso_final_kg NUMERIC(12, 2) NOT NULL DEFAULT 0;
 
     CREATE TABLE IF NOT EXISTS seguimientos (
@@ -85,6 +85,8 @@ async function inicializarBaseDeDatos() {
       tipo VARCHAR(20) NOT NULL DEFAULT 'GASTO',
       categoria VARCHAR(60) NOT NULL,
       descripcion TEXT NOT NULL,
+      cantidad_animales INTEGER NOT NULL DEFAULT 0,
+      peso_final_kg NUMERIC(12, 2) NOT NULL DEFAULT 0,
       monto NUMERIC(14, 2) NOT NULL DEFAULT 0,
       url_factura TEXT,
       fecha DATE NOT NULL,
@@ -93,6 +95,8 @@ async function inicializarBaseDeDatos() {
     );
 
     ALTER TABLE movimientos_contables ADD COLUMN IF NOT EXISTS tipo VARCHAR(20) NOT NULL DEFAULT 'GASTO';
+    ALTER TABLE movimientos_contables ADD COLUMN IF NOT EXISTS cantidad_animales INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE movimientos_contables ADD COLUMN IF NOT EXISTS peso_final_kg NUMERIC(12, 2) NOT NULL DEFAULT 0;
   `;
 
   await pool.query(sql);
