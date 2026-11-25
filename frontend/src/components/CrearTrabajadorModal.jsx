@@ -19,7 +19,7 @@ export default function CrearTrabajadorModal({ onClose, onCreado }) {
     setCargando(true);
 
     try {
-      const token = localStorage.getItem('agro_token');
+      const token = localStorage.getItem('agro_token') || '';
       const res = await fetch(`${API_URL}/api/auth/usuarios`, {
         method: 'POST',
         headers: {
@@ -87,7 +87,7 @@ export default function CrearTrabajadorModal({ onClose, onCreado }) {
               required
               value={nombre}
               onChange={(e) => setNombre(e.target.value)}
-              placeholder="Ej. Carlos Pérez"
+              placeholder="Ej. Andrés González"
               className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
             />
           </div>
