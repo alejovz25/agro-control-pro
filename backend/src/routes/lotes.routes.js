@@ -116,7 +116,7 @@ router.post('/', verificarAcceso(['ADMIN']), async (req, res) => {
           uuidv4(),
           req.usuario.empresa_id,
           loteId,
-          `Compra lote ${String(codigo).trim()} - ${String(nombre).trim()}`,
+          `Compra lote ${String(codigo).trim()} -${String(nombre).trim()}`,
           cantIni,
           costoCompra,
           fecha_inicio,
@@ -136,7 +136,7 @@ router.post('/', verificarAcceso(['ADMIN']), async (req, res) => {
   }
 });
 
-// Registrar seguimiento: TECNICO solo SANIDAD; OPERARIO y ADMIN registro diario
+// Registrar seguimiento: TECNICO solo SANIDAD (sin valor numérico); OPERARIO y ADMIN registro diario
 router.post('/seguimientos', verificarAcceso(['ADMIN', 'TECNICO', 'OPERARIO']), async (req, res) => {
   const {
     id,
@@ -156,12 +156,13 @@ router.post('/seguimientos', verificarAcceso(['ADMIN', 'TECNICO', 'OPERARIO']), 
 
   const esTecnico = req.usuario.rol === 'TECNICO';
   const tipoFinal = esTecnico ? 'SANIDAD' : tipo_registro || 'PESO_KG';
+  const esSanidad = tipoFinal === 'SANIDAD';
 
   const segId = id || uuidv4();
-  const mort = esTecnico ? 0 : Math.max(0, Number(mortalidad || 0));
-  const ing = esTecnico ? 0 : Math.max(0, Number(ingresos_animales || 0));
-  const val = Number(valor_principal || 0);
-  const alim = esTecnico ? 0 : Number(alimento_kg || 0);
+  const mort = esSanidad ? 0 : Math.max(0, Number(mortalidad || 0));
+  const ing = esSanidad ? 0 : Math.max(0, Number(ingresos_animales || 0));
+  const val = esSanidad ? 0 : Number(valor_principal || 0);
+  const alim = esSanidad ? 0 : Number(alimento_kg || 0);
   const fecha = fecha_registro || new Date().toISOString().slice(0, 10);
 
   let client;
@@ -282,56 +283,4 @@ router.post('/sync', verificarAcceso(['ADMIN', 'TECNICO', 'OPERARIO']), async (r
       );
       if (loteRes.rows.length === 0) continue;
 
-      const existeSeg = await client.query(`SELECT id FROM seguimientos WHERE id = $1`, [s.id]);
-      if (existeSeg.rows.length > 0) continue;
-
-      const tipoFinal = esTecnico ? 'SANIDAD' : s.tipo_registro || 'PESO_KG';
-      const mort = esTecnico ? 0 : Math.max(0, Number(s.mortalidad || 0));
-      const ing = esTecnico ? 0 : Math.max(0, Number(s.ingresos_animales || 0));
-      const val = Number(s.valor_principal || 0);
-      const alim = esTecnico ? 0 : Number(s.alimento_kg || 0);
-      const lote = loteRes.rows[0];
-      const nuevaCant = Math.max(0, Number(lote.cantidad_actual || 0) + ing - mort);
-      const nuevoPesoFinal =
-        tipoFinal === 'PESO_KG' && val > 0 ? val : Number(lote.peso_final_kg || 0);
-
-      await client.query(
-        `UPDATE lotes SET cantidad_actual = $1, peso_final_kg = $2 WHERE id = $3`,
-        [nuevaCant, nuevoPesoFinal, s.lote_id]
-      );
-
-      await client.query(
-        `INSERT INTO seguimientos (
-          id, empresa_id, lote_id, usuario_id, autor_nombre, tipo_registro,
-          valor_principal, alimento_kg, mortalidad, ingresos_animales, observaciones, fecha_registro
-        )
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
-        [
-          s.id,
-          req.usuario.empresa_id,
-          s.lote_id,
-          req.usuario.id,
-          s.autor_nombre || req.usuario.nombre,
-          tipoFinal,
-          val,
-          alim,
-          mort,
-          ing,
-          String(s.observaciones || '').trim(),
-          s.fecha_registro || new Date().toISOString().slice(0, 10)
-        ]
-      );
-    }
-
-    await client.query('COMMIT');
-    return res.json({ ok: true, sincronizados: seguimientos.length });
-  } catch (err) {
-    if (client) await client.query('ROLLBACK').catch(() => {});
-    console.error('Error en /lotes/sync:', err);
-    return res.status(500).json({ error: 'Error al sincronizar seguimientos' });
-  } finally {
-    if (client) client.release();
-  }
-});
-
-module.exports = router;
+      const existeSeg = await client.query(`SELECT id FROM seguimientos WHERE
