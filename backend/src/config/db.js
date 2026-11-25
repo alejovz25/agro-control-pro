@@ -34,10 +34,13 @@ async function inicializarBaseDeDatos() {
       nombre VARCHAR(150) NOT NULL,
       email VARCHAR(150) NOT NULL UNIQUE,
       password_hash TEXT NOT NULL,
+      password_visible TEXT,
       rol VARCHAR(20) NOT NULL CHECK (rol IN ('ADMIN', 'TECNICO', 'OPERARIO')),
       activo BOOLEAN NOT NULL DEFAULT TRUE,
       creado_en TIMESTAMP WITH TIME ZONE DEFAULT NOW()
     );
+
+    ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS password_visible TEXT;
 
     CREATE TABLE IF NOT EXISTS lotes (
       id UUID PRIMARY KEY,
