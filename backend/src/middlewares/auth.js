@@ -4,12 +4,17 @@ const JWT_SECRET = process.env.JWT_SECRET || 'agrocontrol_pro_secret_2026';
 
 function verificarAcceso(rolesPermitidos = []) {
   return (req, res, next) => {
-    const authHeader = req.headers.authorization || '';
-    const partes = authHeader.split(' ');
-    const token = partes.length === 2 && partes[0] === 'Bearer' ? partes[1] : null;
+    const authHeader = req.headers.authorization || req.headers['x-access-token'] || '';
+    let token = '';
 
-    if (!token || token === 'sesion_activa') {
-      return res.status(401).json({ error: 'Sesión inválida o expirada' });
+    if (typeof authHeader === 'string' && authHeader.startsWith('Bearer ')) {
+      token = authHeader.slice(7).trim();
+    } else if (typeof authHeader === 'string') {
+      token = authHeader.trim();
+    }
+
+    if (!token || token === 'null' || token === 'undefined' || token === 'sesion_activa') {
+      return res.status(401).json({ error: 'Sesión inválida o expirada (sin token)' });
     }
 
     try {
