@@ -85,31 +85,14 @@ function GraficaLote({ registros = [] }) {
           stroke="#cbd5e1"
           strokeWidth="1"
         />
-        <polyline
-          fill="none"
-          stroke="#047857"
-          strokeWidth="2.5"
-          points={polylinePoints}
-        />
+        <polyline fill="none" stroke="#047857" strokeWidth="2.5" points={polylinePoints} />
         {coords.map((c) => (
           <g key={c.idx}>
             <circle cx={c.x} cy={c.y} r="4" fill="#047857" />
-            <text
-              x={c.x}
-              y={height - 4}
-              textAnchor="middle"
-              fontSize="10"
-              fill="#475569"
-            >
+            <text x={c.x} y={height - 4} textAnchor="middle" fontSize="10" fill="#475569">
               {c.label}
             </text>
-            <text
-              x={c.x}
-              y={c.y - 8}
-              textAnchor="middle"
-              fontSize="10"
-              fill="#065f46"
-            >
+            <text x={c.x} y={c.y - 8} textAnchor="middle" fontSize="10" fill="#065f46">
               {c.valor}
             </text>
           </g>
@@ -143,18 +126,18 @@ export default function App() {
   const [movimientos, setMovimientos] = useState([]);
   const [seguimientos, setSeguimientos] = useState([]);
 
+  // Crear lote: peso inicial por animal al crear + costo de compra inicial
   const [nuevoLote, setNuevoLote] = useState({
     codigo: '',
     nombre: '',
     especie: 'Bovinos Cárnicos',
     cantidad_inicial: '',
-    peso_inicial_kg: '',
-    peso_final_kg: '',
+    peso_inicial_animal_kg: '',
     costo_compra_total: '',
-    valor_venta_total: '',
     fecha_inicio: new Date().toISOString().slice(0, 10)
   });
 
+  // Registro diario
   const [nuevoSeg, setNuevoSeg] = useState({
     lote_id: '',
     tipo_registro: 'PESO_KG',
@@ -166,11 +149,14 @@ export default function App() {
     fecha_registro: new Date().toISOString().slice(0, 10)
   });
 
+  // Movimientos financieros (GASTO, COMPRA, VENTA con cantidad de animales y peso final)
   const [nuevoMov, setNuevoMov] = useState({
     lote_id: '',
-    tipo: 'GASTO',
-    categoria: 'ALIMENTO',
+    tipo: 'VENTA',
+    categoria: 'VENTA_ANIMAL',
     descripcion: '',
+    cantidad_animales: '1',
+    peso_final_kg: '',
     monto: '',
     fecha: new Date().toISOString().slice(0, 10),
     archivo: null
@@ -215,7 +201,7 @@ export default function App() {
   }, []);
 
   const cargarDatosServidor = useCallback(async () => {
-    if (!token || token === 'sesion_activa' || !navigator.onLine) return;
+    if (!token || !navigator.onLine) return;
     const headers = { Authorization: `Bearer ${token}` };
 
     try {
@@ -297,7 +283,7 @@ export default function App() {
       rol: String(u.rol || u.role || 'ADMIN').toUpperCase()
     };
 
-    const nuevoToken = data?.token || leerSeguro('agro_token') || '';
+    const nuevoToken = data?.token || data?.accessToken || data?.jwt || '';
     if (nuevoToken) {
       guardarSeguro('agro_token', nuevoToken);
       setToken(nuevoToken);
@@ -311,9 +297,9 @@ export default function App() {
     e.preventDefault();
     if (usuario?.rol !== 'ADMIN') return;
 
-    const cantIni = Number(nuevoLote.cantidad_inicial || 0);
+    const cantIni = Math.max(0, Number(nuevoLote.cantidad_inicial || 0));
+    const pesoIniAnimal = Number(nuevoLote.peso_inicial_animal_kg || 0);
     const costoCompra = Number(nuevoLote.costo_compra_total || 0);
-    const valorVenta = Number(nuevoLote.valor_venta_total || 0);
     const fechaInicio = nuevoLote.fecha_inicio;
 
     const lotePayload = {
@@ -323,44 +309,32 @@ export default function App() {
       especie: nuevoLote.especie,
       cantidad_inicial: cantIni,
       cantidad_actual: cantIni,
-      peso_inicial_kg: Number(nuevoLote.peso_inicial_kg || 0),
-      peso_final_kg: Number(nuevoLote.peso_final_kg || 0),
+      peso_inicial_animal_kg: pesoIniAnimal,
+      peso_final_kg: 0,
       costo_compra_total: costoCompra,
-      valor_venta_total: valorVenta,
+      valor_venta_total: 0,
       fecha_inicio: fechaInicio,
       estado: 'ACTIVO',
       pendiente_sync: !online
     };
 
-    const movsGenerados = [];
-    if (costoCompra > 0) {
-      movsGenerados.push({
-        id: `compra-${lotePayload.id}`,
-        lote_id: lotePayload.id,
-        lote_codigo: lotePayload.codigo,
-        lote_nombre: lotePayload.nombre,
-        tipo: 'COMPRA',
-        categoria: 'COMPRA_LOTE',
-        descripcion: `Compra lote ${lotePayload.codigo} - ${lotePayload.nombre}`,
-        monto: costoCompra,
-        fecha: fechaInicio,
-        pendiente_sync: !online
-      });
-    }
-    if (valorVenta > 0) {
-      movsGenerados.push({
-        id: `venta-${lotePayload.id}`,
-        lote_id: lotePayload.id,
-        lote_codigo: lotePayload.codigo,
-        lote_nombre: lotePayload.nombre,
-        tipo: 'VENTA',
-        categoria: 'VENTA_LOTE',
-        descripcion: `Venta lote ${lotePayload.codigo} - ${lotePayload.nombre}`,
-        monto: valorVenta,
-        fecha: fechaInicio,
-        pendiente_sync: !online
-      });
-    }
+    const movCompra =
+      costoCompra > 0
+        ? {
+            id: `compra-${lotePayload.id}`,
+            lote_id: lotePayload.id,
+            lote_codigo: lotePayload.codigo,
+            lote_nombre: lotePayload.nombre,
+            tipo: 'COMPRA',
+            categoria: 'COMPRA_LOTE',
+            descripcion: `Compra lote ${lotePayload.codigo} - ${lotePayload.nombre}`,
+            cantidad_animales: cantIni,
+            peso_final_kg: 0,
+            monto: costoCompra,
+            fecha: fechaInicio,
+            pendiente_sync: !online
+          }
+        : null;
 
     try {
       if (online && token) {
@@ -384,9 +358,9 @@ export default function App() {
       } else {
         setLotes((prev) => [lotePayload, ...prev]);
         if (db.lotes) await db.lotes.put(lotePayload);
-        if (movsGenerados.length > 0) {
-          setMovimientos((prev) => [...movsGenerados, ...prev]);
-          if (db.gastos) await db.gastos.bulkPut(movsGenerados);
+        if (movCompra) {
+          setMovimientos((prev) => [movCompra, ...prev]);
+          if (db.gastos) await db.gastos.put(movCompra);
         }
       }
 
@@ -395,13 +369,11 @@ export default function App() {
         nombre: '',
         especie: 'Bovinos Cárnicos',
         cantidad_inicial: '',
-        peso_inicial_kg: '',
-        peso_final_kg: '',
+        peso_inicial_animal_kg: '',
         costo_compra_total: '',
-        valor_venta_total: '',
         fecha_inicio: new Date().toISOString().slice(0, 10)
       });
-      setMensajeEstado('Lote creado y valores financieros registrados.');
+      setMensajeEstado('Lote creado con su peso inicial por animal y compra registrada.');
     } catch (err) {
       setMensajeEstado(err.message);
     }
@@ -449,45 +421,46 @@ export default function App() {
           },
           body: JSON.stringify(registro)
         });
-        if (res.ok) {
-          const dataRes = await res.json().catch(() => ({}));
-          const segGuardado = {
-            ...(dataRes.seguimiento || registro),
-            lote_codigo: loteObj?.codigo || registro.lote_codigo,
-            lote_nombre: loteObj?.nombre || registro.lote_nombre,
-            pendiente_sync: false
-          };
-          setSeguimientos((prev) => [segGuardado, ...prev]);
-          if (db.seguimientos) await db.seguimientos.put(segGuardado);
-
-          setLotes((prev) =>
-            prev.map((l) =>
-              l.id === targetLoteId
-                ? {
-                    ...l,
-                    cantidad_actual:
-                      dataRes.cantidad_actual !== undefined ? dataRes.cantidad_actual : cantActualNueva,
-                    peso_final_kg:
-                      dataRes.peso_final_kg !== undefined ? dataRes.peso_final_kg : l.peso_final_kg
-                  }
-                : l
-            )
-          );
-
-          setNuevoSeg((prev) => ({
-            ...prev,
-            valor_principal: '',
-            alimento_kg: '',
-            ingresos_animales: '0',
-            mortalidad: '0',
-            observaciones: ''
-          }));
-          setMensajeEstado('Seguimiento guardado y lote actualizado en el servidor.');
-          return;
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.error || 'Error al guardar seguimiento');
         }
+        const dataRes = await res.json().catch(() => ({}));
+        const segGuardado = {
+          ...(dataRes.seguimiento || registro),
+          lote_codigo: loteObj?.codigo || registro.lote_codigo,
+          lote_nombre: loteObj?.nombre || registro.lote_nombre,
+          pendiente_sync: false
+        };
+        setSeguimientos((prev) => [segGuardado, ...prev]);
+        if (db.seguimientos) await db.seguimientos.put(segGuardado);
+
+        setLotes((prev) =>
+          prev.map((l) =>
+            l.id === targetLoteId
+              ? {
+                  ...l,
+                  cantidad_actual:
+                    dataRes.cantidad_actual !== undefined ? dataRes.cantidad_actual : cantActualNueva,
+                  peso_final_kg:
+                    dataRes.peso_final_kg !== undefined ? dataRes.peso_final_kg : l.peso_final_kg
+                }
+              : l
+          )
+        );
+
+        setNuevoSeg((prev) => ({
+          ...prev,
+          valor_principal: '',
+          alimento_kg: '',
+          ingresos_animales: '0',
+          mortalidad: '0',
+          observaciones: ''
+        }));
+        setMensajeEstado('Seguimiento guardado y cantidad del lote actualizada.');
+        return;
       }
 
-      // Guardado local si está offline o falla el servidor
       setSeguimientos((prev) => [registro, ...prev]);
       if (db.seguimientos) await db.seguimientos.put(registro);
 
@@ -512,9 +485,7 @@ export default function App() {
         mortalidad: '0',
         observaciones: ''
       }));
-      setMensajeEstado(
-        'Seguimiento guardado localmente (pendiente de sincronizar con el servidor).'
-      );
+      setMensajeEstado('Seguimiento guardado localmente (pendiente de sincronizar).');
     } catch (err) {
       setMensajeEstado(err.message || 'Error al registrar seguimiento');
     }
@@ -526,15 +497,21 @@ export default function App() {
 
     const loteObj = lotes.find((l) => l.id === nuevoMov.lote_id);
     const montoNum = Number(nuevoMov.monto || 0);
+    const cantAnimales = Math.max(0, Number(nuevoMov.cantidad_animales || 0));
+    const pesoFinal = Number(nuevoMov.peso_final_kg || 0);
+    const tipoNorm = String(nuevoMov.tipo || 'GASTO').toUpperCase();
+    const movId = uuidv4();
 
     try {
       if (online && token) {
         const formData = new FormData();
-        formData.append('id', uuidv4());
+        formData.append('id', movId);
         formData.append('lote_id', nuevoMov.lote_id);
-        formData.append('tipo', nuevoMov.tipo);
+        formData.append('tipo', tipoNorm);
         formData.append('categoria', nuevoMov.categoria);
         formData.append('descripcion', nuevoMov.descripcion.trim());
+        formData.append('cantidad_animales', String(cantAnimales));
+        formData.append('peso_final_kg', String(pesoFinal));
         formData.append('monto', String(montoNum));
         formData.append('fecha', nuevoMov.fecha);
         if (nuevoMov.archivo) {
@@ -548,27 +525,20 @@ export default function App() {
         });
         if (!res.ok) {
           const errData = await res.json().catch(() => ({}));
-          throw new Error(errData.error || 'Error al registrar movimiento');
+          throw new Error(errData.error || 'Error al registrar movimiento financiero');
         }
-        const creado = await res.json().catch(() => ({}));
-        const movFinal = {
-          ...(creado?.id ? creado : { ...nuevoMov, id: uuidv4(), monto: montoNum }),
-          lote_codigo: loteObj?.codigo || '',
-          lote_nombre: loteObj?.nombre || '',
-          pendiente_sync: false
-        };
-        setMovimientos((prev) => [movFinal, ...prev]);
-        if (db.gastos) await db.gastos.put(movFinal);
         await cargarDatosServidor();
       } else {
         const movOffline = {
-          id: uuidv4(),
+          id: movId,
           lote_id: nuevoMov.lote_id || null,
           lote_codigo: loteObj?.codigo || '',
           lote_nombre: loteObj?.nombre || '',
-          tipo: nuevoMov.tipo,
+          tipo: tipoNorm,
           categoria: nuevoMov.categoria,
           descripcion: nuevoMov.descripcion.trim(),
+          cantidad_animales: cantAnimales,
+          peso_final_kg: pesoFinal,
           monto: montoNum,
           fecha: nuevoMov.fecha,
           nombre_archivo: nuevoMov.archivo ? nuevoMov.archivo.name : null,
@@ -576,25 +546,66 @@ export default function App() {
         };
         setMovimientos((prev) => [movOffline, ...prev]);
         if (db.gastos) await db.gastos.put(movOffline);
+
+        if (nuevoMov.lote_id && tipoNorm === 'VENTA') {
+          setLotes((prev) =>
+            prev.map((l) =>
+              l.id === nuevoMov.lote_id
+                ? {
+                    ...l,
+                    cantidad_actual: Math.max(
+                      0,
+                      Number(l.cantidad_actual ?? l.cantidad_inicial ?? 0) - cantAnimales
+                    ),
+                    valor_venta_total: Number(l.valor_venta_total || 0) + montoNum,
+                    peso_final_kg: pesoFinal > 0 ? pesoFinal : l.peso_final_kg
+                  }
+                : l
+            )
+          );
+          const notaVenta = {
+            id: `seg-venta-${movId}`,
+            lote_id: nuevoMov.lote_id,
+            lote_codigo: loteObj?.codigo || '',
+            lote_nombre: loteObj?.nombre || '',
+            autor_nombre: usuario?.nombre || 'Admin',
+            tipo_registro: 'VENTA_ANIMAL',
+            valor_principal: pesoFinal > 0 ? pesoFinal : montoNum,
+            alimento_kg: 0,
+            ingresos_animales: 0,
+            mortalidad: 0,
+            observaciones: `Venta de ${cantAnimales} animal(es) por $${montoNum.toLocaleString()} (Peso final: ${pesoFinal} kg) - ${nuevoMov.descripcion.trim()}`,
+            fecha_registro: nuevoMov.fecha,
+            pendiente_sync: true
+          };
+          setSeguimientos((prev) => [notaVenta, ...prev]);
+          if (db.seguimientos) await db.seguimientos.put(notaVenta);
+        }
       }
 
       setNuevoMov({
         lote_id: '',
-        tipo: 'GASTO',
-        categoria: 'ALIMENTO',
+        tipo: 'VENTA',
+        categoria: 'VENTA_ANIMAL',
         descripcion: '',
+        cantidad_animales: '1',
+        peso_final_kg: '',
         monto: '',
         fecha: new Date().toISOString().slice(0, 10),
         archivo: null
       });
-      setMensajeEstado('Movimiento financiero registrado.');
+      setMensajeEstado(
+        tipoNorm === 'VENTA'
+          ? 'Venta registrada: animales descontados del lote y anotación guardada.'
+          : 'Movimiento financiero guardado.'
+      );
     } catch (err) {
       setMensajeEstado(err.message);
     }
   };
 
   const handleSincronizarTodo = async () => {
-    if (!online || !token || token === 'sesion_activa') {
+    if (!online || !token) {
       setMensajeEstado('Necesitas conexión a internet y sesión válida para sincronizar.');
       return;
     }
@@ -702,6 +713,14 @@ export default function App() {
                 : `Sincronizar${totalPendientes > 0 ? ` (${totalPendientes})` : ''}`}
             </button>
 
+            <button
+              type="button"
+              onClick={() => setVistaActiva('reportes')}
+              className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold"
+            >
+              Reporte por Lotes
+            </button>
+
             {esAdmin && (
               <>
                 <button
@@ -740,7 +759,6 @@ export default function App() {
         </div>
       </header>
 
-      {/* Navegación interna */}
       <nav className="bg-white border-b border-slate-200 px-4">
         <div className="max-w-6xl mx-auto flex gap-4 text-sm font-semibold">
           <button
@@ -795,7 +813,6 @@ export default function App() {
           </div>
         )}
 
-        {/* Resumen superior */}
         <section className="grid grid-cols-2 sm:grid-cols-4 gap-4">
           <div className="bg-white rounded-2xl p-4 shadow-sm border border-slate-200">
             <p className="text-xs text-slate-500">Lotes Activos</p>
@@ -864,7 +881,7 @@ export default function App() {
                       onChange={(e) => setNuevoSeg({ ...nuevoSeg, tipo_registro: e.target.value })}
                       className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
                     >
-                      <option value="PESO_KG">Peso Promedio / Final (Kg)</option>
+                      <option value="PESO_KG">Peso Promedio / Control (Kg)</option>
                       <option value="LECHE_LITROS">Leche (Litros)</option>
                       <option value="HUEVOS">Producción de Huevos</option>
                       <option value="SANIDAD">Sanidad / Aplicación</option>
@@ -949,14 +966,14 @@ export default function App() {
                 </button>
               </form>
 
-              {/* Crear lote (ADMIN) */}
+              {/* Crear lote: peso inicial por animal al crear + compra */}
               {esAdmin ? (
                 <form
                   onSubmit={handleCrearLote}
                   className="bg-white rounded-2xl p-5 shadow-sm border border-slate-200 space-y-3"
                 >
                   <h2 className="text-base font-bold text-slate-800">
-                    Nuevo Lote (Cárnicos / Producción)
+                    Nuevo Lote (Peso Inicial por Animal y Compra)
                   </h2>
                   <div className="grid grid-cols-2 gap-3">
                     <input
@@ -993,7 +1010,7 @@ export default function App() {
                       type="number"
                       required
                       min="1"
-                      placeholder="Cantidad inicial"
+                      placeholder="Cantidad de animales"
                       value={nuevoLote.cantidad_inicial}
                       onChange={(e) =>
                         setNuevoLote({ ...nuevoLote, cantidad_inicial: e.target.value })
@@ -1006,26 +1023,13 @@ export default function App() {
                     <input
                       type="number"
                       step="any"
-                      placeholder="Peso inicial (kg)"
-                      value={nuevoLote.peso_inicial_kg}
+                      placeholder="Peso inicial por animal (kg)"
+                      value={nuevoLote.peso_inicial_animal_kg}
                       onChange={(e) =>
-                        setNuevoLote({ ...nuevoLote, peso_inicial_kg: e.target.value })
+                        setNuevoLote({ ...nuevoLote, peso_inicial_animal_kg: e.target.value })
                       }
                       className="border border-slate-300 rounded-lg px-3 py-2 text-sm"
                     />
-                    <input
-                      type="number"
-                      step="any"
-                      placeholder="Peso final (kg)"
-                      value={nuevoLote.peso_final_kg}
-                      onChange={(e) =>
-                        setNuevoLote({ ...nuevoLote, peso_final_kg: e.target.value })
-                      }
-                      className="border border-slate-300 rounded-lg px-3 py-2 text-sm"
-                    />
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3">
                     <input
                       type="number"
                       step="any"
@@ -1033,16 +1037,6 @@ export default function App() {
                       value={nuevoLote.costo_compra_total}
                       onChange={(e) =>
                         setNuevoLote({ ...nuevoLote, costo_compra_total: e.target.value })
-                      }
-                      className="border border-slate-300 rounded-lg px-3 py-2 text-sm"
-                    />
-                    <input
-                      type="number"
-                      step="any"
-                      placeholder="Valor final de venta ($)"
-                      value={nuevoLote.valor_venta_total}
-                      onChange={(e) =>
-                        setNuevoLote({ ...nuevoLote, valor_venta_total: e.target.value })
                       }
                       className="border border-slate-300 rounded-lg px-3 py-2 text-sm"
                     />
@@ -1066,12 +1060,19 @@ export default function App() {
               )}
             </section>
 
-            {/* Tabla de lotes (clic abre detalle) */}
+            {/* Tabla de lotes */}
             <section className="bg-white rounded-2xl p-5 shadow-sm border border-slate-200">
-              <div className="flex items-center justify-between mb-3">
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
                 <h2 className="text-base font-bold text-slate-800">
                   Lotes Registrados (clic en un lote para abrir su panel)
                 </h2>
+                <button
+                  type="button"
+                  onClick={() => setVistaActiva('reportes')}
+                  className="px-3 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-semibold"
+                >
+                  Ver Reporte por Lotes
+                </button>
               </div>
 
               {lotes.length === 0 ? (
@@ -1085,7 +1086,7 @@ export default function App() {
                         <th className="py-2 pr-4">Nombre</th>
                         <th className="py-2 pr-4">Especie</th>
                         <th className="py-2 pr-4">Animales</th>
-                        <th className="py-2 pr-4">Peso Ini / Fin</th>
+                        <th className="py-2 pr-4">Peso Ini/Animal / Final</th>
                         <th className="py-2 pr-4">Compra / Venta</th>
                         <th className="py-2">Acción</th>
                       </tr>
@@ -1107,7 +1108,7 @@ export default function App() {
                             {lote.cantidad_inicial}
                           </td>
                           <td className="py-2.5 pr-4">
-                            {Number(lote.peso_inicial_kg || 0)} kg /{' '}
+                            {Number(lote.peso_inicial_animal_kg || 0)} kg /{' '}
                             {Number(lote.peso_final_kg || 0)} kg
                           </td>
                           <td className="py-2.5 pr-4">
@@ -1138,19 +1139,37 @@ export default function App() {
 
         {vistaActiva === 'reportes' && (
           <section className="space-y-6">
-            {/* Reporte de avance por lote */}
             <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-200 space-y-4">
-              <h2 className="text-base font-bold text-slate-800">
-                Reporte de Avance por Lote (Cárnicos, Población y Rentabilidad)
-              </h2>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h2 className="text-base font-bold text-slate-800">
+                  Reporte por Lotes (Población, Peso Inicial/Final y Rentabilidad)
+                </h2>
+                {esAdmin && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      exportarReporteContableExcel(
+                        `Reporte_Lotes_${String(usuario?.empresa_id || 'AgroControl').slice(0, 8)}`,
+                        lotes,
+                        movimientos,
+                        seguimientos
+                      )
+                    }
+                    className="px-3 py-1.5 rounded-lg bg-amber-400 hover:bg-amber-300 text-slate-950 text-xs font-semibold"
+                  >
+                    Exportar Reporte Excel
+                  </button>
+                )}
+              </div>
+
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {lotes.map((l) => {
                   const segs = seguimientos.filter((s) => s.lote_id === l.id);
                   const mortTotal = segs.reduce((a, s) => a + Number(s.mortalidad || 0), 0);
                   const ingTotal = segs.reduce((a, s) => a + Number(s.ingresos_animales || 0), 0);
                   const alimTotal = segs.reduce((a, s) => a + Number(s.alimento_kg || 0), 0);
-                  const gananciaPeso =
-                    Number(l.peso_final_kg || 0) - Number(l.peso_inicial_kg || 0);
+                  const pesoIniAnimal = Number(l.peso_inicial_animal_kg || 0);
+                  const pesoFin = Number(l.peso_final_kg || 0);
                   const margen =
                     Number(l.valor_venta_total || 0) - Number(l.costo_compra_total || 0);
 
@@ -1177,9 +1196,8 @@ export default function App() {
                         <strong>{alimTotal} kg</strong>
                       </p>
                       <p className="text-xs text-slate-600">
-                        Peso inicial: <strong>{Number(l.peso_inicial_kg || 0)} kg</strong> &rarr;
-                        Peso final: <strong>{Number(l.peso_final_kg || 0)} kg</strong> (Ganancia:{' '}
-                        <strong>{gananciaPeso} kg</strong>)
+                        Peso inicial/animal: <strong>{pesoIniAnimal} kg</strong> &bull; Peso final:{' '}
+                        <strong>{pesoFin} kg</strong>
                       </p>
                       <p className="text-xs text-slate-600">
                         Compra: <strong>${Number(l.costo_compra_total || 0).toLocaleString()}</strong>{' '}
@@ -1193,7 +1211,6 @@ export default function App() {
               </div>
             </div>
 
-            {/* Observaciones de empleados visibles */}
             <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-200 space-y-3">
               <h2 className="text-base font-bold text-slate-800">
                 Anotaciones y Observaciones de Empleados
@@ -1231,43 +1248,73 @@ export default function App() {
               className="bg-white rounded-2xl p-5 shadow-sm border border-slate-200 space-y-3"
             >
               <h2 className="text-base font-bold text-slate-800">
-                Registrar Gasto, Compra o Venta
+                Registrar Venta, Compra o Gasto
               </h2>
-              <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <select
                   value={nuevoMov.tipo}
-                  onChange={(e) => setNuevoMov({ ...nuevoMov, tipo: e.target.value })}
+                  onChange={(e) => {
+                    const t = e.target.value;
+                    setNuevoMov({
+                      ...nuevoMov,
+                      tipo: t,
+                      categoria: t === 'VENTA' ? 'VENTA_ANIMAL' : t === 'COMPRA' ? 'COMPRA_LOTE' : 'ALIMENTO'
+                    });
+                  }}
                   className="border border-slate-300 rounded-lg px-3 py-2 text-sm"
                 >
-                  <option value="GASTO">GASTO</option>
+                  <option value="VENTA">VENTA (Descuenta animales del lote)</option>
                   <option value="COMPRA">COMPRA</option>
-                  <option value="VENTA">VENTA (Ingreso)</option>
+                  <option value="GASTO">GASTO</option>
                 </select>
+
                 <select
                   value={nuevoMov.lote_id}
                   onChange={(e) => setNuevoMov({ ...nuevoMov, lote_id: e.target.value })}
                   className="border border-slate-300 rounded-lg px-3 py-2 text-sm"
                 >
-                  <option value="">Lote asociado (opcional)</option>
+                  <option value="">Seleccionar lote...</option>
                   {lotes.map((l) => (
                     <option key={l.id} value={l.id}>
-                      {l.codigo} - {l.nombre}
+                      {l.codigo} - {l.nombre} ({l.cantidad_actual ?? l.cantidad_inicial} und)
                     </option>
                   ))}
                 </select>
+
                 <input
                   type="text"
                   required
-                  placeholder="Categoría (ej. ALIMENTO, VENTA_LOTE)"
+                  placeholder="Categoría (ej. VENTA_ANIMAL, ALIMENTO)"
                   value={nuevoMov.categoria}
                   onChange={(e) => setNuevoMov({ ...nuevoMov, categoria: e.target.value })}
+                  className="border border-slate-300 rounded-lg px-3 py-2 text-sm"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <input
+                  type="number"
+                  min="0"
+                  placeholder="Cantidad de animales (ej. 1)"
+                  value={nuevoMov.cantidad_animales}
+                  onChange={(e) =>
+                    setNuevoMov({ ...nuevoMov, cantidad_animales: e.target.value })
+                  }
+                  className="border border-slate-300 rounded-lg px-3 py-2 text-sm"
+                />
+                <input
+                  type="number"
+                  step="any"
+                  placeholder="Peso final (kg)"
+                  value={nuevoMov.peso_final_kg}
+                  onChange={(e) => setNuevoMov({ ...nuevoMov, peso_final_kg: e.target.value })}
                   className="border border-slate-300 rounded-lg px-3 py-2 text-sm"
                 />
                 <input
                   type="number"
                   step="any"
                   required
-                  placeholder="Monto ($)"
+                  placeholder="Valor / Monto ($)"
                   value={nuevoMov.monto}
                   onChange={(e) => setNuevoMov({ ...nuevoMov, monto: e.target.value })}
                   className="border border-slate-300 rounded-lg px-3 py-2 text-sm"
@@ -1278,7 +1325,7 @@ export default function App() {
                 <input
                   type="text"
                   required
-                  placeholder="Descripción del movimiento"
+                  placeholder="Descripción del movimiento (ej. Venta de novillo en feria)"
                   value={nuevoMov.descripcion}
                   onChange={(e) => setNuevoMov({ ...nuevoMov, descripcion: e.target.value })}
                   className="border border-slate-300 rounded-lg px-3 py-2 text-sm"
@@ -1326,7 +1373,8 @@ export default function App() {
                         <th className="py-2 pr-4">Fecha</th>
                         <th className="py-2 pr-4">Tipo</th>
                         <th className="py-2 pr-4">Descripción</th>
-                        <th className="py-2 pr-4">Lote</th>
+                        <th className="py-2 pr-4">Lote / Und</th>
+                        <th className="py-2 pr-4">Peso Final</th>
                         <th className="py-2">Monto</th>
                       </tr>
                     </thead>
@@ -1338,7 +1386,15 @@ export default function App() {
                             <td className="py-2.5 pr-4">{m.fecha}</td>
                             <td className="py-2.5 pr-4 font-semibold">{m.tipo || 'GASTO'}</td>
                             <td className="py-2.5 pr-4">{m.descripcion}</td>
-                            <td className="py-2.5 pr-4">{m.lote_codigo || '-'}</td>
+                            <td className="py-2.5 pr-4">
+                              {m.lote_codigo || '-'}
+                              {Number(m.cantidad_animales || 0) > 0
+                                ? ` (${m.cantidad_animales} und)`
+                                : ''}
+                            </td>
+                            <td className="py-2.5 pr-4">
+                              {Number(m.peso_final_kg || 0) > 0 ? `${m.peso_final_kg} kg` : '-'}
+                            </td>
                             <td
                               className={`py-2.5 font-semibold ${
                                 esVenta ? 'text-emerald-700' : 'text-red-600'
@@ -1358,7 +1414,6 @@ export default function App() {
         )}
       </main>
 
-      {/* Panel / Modal de detalle del lote al hacer clic */}
       {loteDetalle && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50 overflow-y-auto">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl p-6 space-y-4 my-8">
@@ -1370,8 +1425,9 @@ export default function App() {
                 <p className="text-xs text-slate-500">
                   {loteDetalle.especie} &bull; Animales actuales:{' '}
                   <strong>{loteDetalle.cantidad_actual ?? loteDetalle.cantidad_inicial}</strong>{' '}
-                  &bull; Peso: <strong>{Number(loteDetalle.peso_inicial_kg || 0)} kg</strong> &rarr;{' '}
-                  <strong>{Number(loteDetalle.peso_final_kg || 0)} kg</strong>
+                  &bull; Peso inicial/animal:{' '}
+                  <strong>{Number(loteDetalle.peso_inicial_animal_kg || 0)} kg</strong> &bull; Peso
+                  final: <strong>{Number(loteDetalle.peso_final_kg || 0)} kg</strong>
                 </p>
               </div>
               <button
@@ -1385,7 +1441,6 @@ export default function App() {
 
             <GraficaLote registros={seguimientosLoteDetalle} />
 
-            {/* Registro diario directo desde el lote */}
             <form
               onSubmit={(e) => handleRegistrarSeguimiento(e, loteDetalle.id)}
               className="bg-slate-50 rounded-xl p-4 border border-slate-200 space-y-3"
@@ -1447,7 +1502,6 @@ export default function App() {
               </button>
             </form>
 
-            {/* Observaciones y controles del lote */}
             <div className="space-y-2 max-h-48 overflow-y-auto">
               <h3 className="text-sm font-bold text-slate-800">
                 Historial y Observaciones del Lote ({seguimientosLoteDetalle.length})
