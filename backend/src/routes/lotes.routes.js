@@ -35,7 +35,6 @@ router.get('/seguimientos', verificarAcceso(['ADMIN', 'TECNICO', 'OPERARIO']), a
   }
 });
 
-// Crear lote con peso inicial por animal y compra inicial (ID UUID válido)
 router.post('/', verificarAcceso(['ADMIN']), async (req, res) => {
   const {
     id,
@@ -106,7 +105,6 @@ router.post('/', verificarAcceso(['ADMIN']), async (req, res) => {
     );
 
     if (costoCompra > 0) {
-      const movId = uuidv4();
       await client.query(
         `INSERT INTO movimientos_contables (
           id, empresa_id, lote_id, tipo, categoria, descripcion, cantidad_animales,
@@ -115,7 +113,7 @@ router.post('/', verificarAcceso(['ADMIN']), async (req, res) => {
         VALUES ($1,$2,$3,'COMPRA','COMPRA_LOTE',$4,$5,0,$6,$7,$8)
         ON CONFLICT (id) DO UPDATE SET monto = EXCLUDED.monto`,
         [
-          movId,
+          uuidv4(),
           req.usuario.empresa_id,
           loteId,
           `Compra lote ${String(codigo).trim()} - ${String(nombre).trim()}`,
@@ -138,7 +136,7 @@ router.post('/', verificarAcceso(['ADMIN']), async (req, res) => {
   }
 });
 
-// Registrar seguimiento diario y descontar mortalidad / sumar ingresos en el lote
+// Registrar seguimiento: TECNICO solo SANIDAD; OPERARIO y ADMIN registro diario
 router.post('/seguimientos', verificarAcceso(['ADMIN', 'TECNICO', 'OPERARIO']), async (req, res) => {
   const {
     id,
@@ -152,15 +150,18 @@ router.post('/seguimientos', verificarAcceso(['ADMIN', 'TECNICO', 'OPERARIO']), 
     fecha_registro
   } = req.body;
 
-  if (!lote_id || !tipo_registro) {
-    return res.status(400).json({ error: 'lote_id y tipo_registro son obligatorios' });
+  if (!lote_id) {
+    return res.status(400).json({ error: 'lote_id es obligatorio' });
   }
 
+  const esTecnico = req.usuario.rol === 'TECNICO';
+  const tipoFinal = esTecnico ? 'SANIDAD' : tipo_registro || 'PESO_KG';
+
   const segId = id || uuidv4();
-  const mort = Math.max(0, Number(mortalidad || 0));
-  const ing = Math.max(0, Number(ingresos_animales || 0));
+  const mort = esTecnico ? 0 : Math.max(0, Number(mortalidad || 0));
+  const ing = esTecnico ? 0 : Math.max(0, Number(ingresos_animales || 0));
   const val = Number(valor_principal || 0);
-  const alim = Number(alimento_kg || 0);
+  const alim = esTecnico ? 0 : Number(alimento_kg || 0);
   const fecha = fecha_registro || new Date().toISOString().slice(0, 10);
 
   let client;
@@ -180,7 +181,7 @@ router.post('/seguimientos', verificarAcceso(['ADMIN', 'TECNICO', 'OPERARIO']), 
     const lote = loteRes.rows[0];
     const nuevaCantidad = Math.max(0, Number(lote.cantidad_actual || 0) + ing - mort);
     const nuevoPesoFinal =
-      tipo_registro === 'PESO_KG' && val > 0 ? val : Number(lote.peso_final_kg || 0);
+      tipoFinal === 'PESO_KG' && val > 0 ? val : Number(lote.peso_final_kg || 0);
 
     await client.query(
       `UPDATE lotes SET cantidad_actual = $1, peso_final_kg = $2 WHERE id = $3`,
@@ -208,7 +209,7 @@ router.post('/seguimientos', verificarAcceso(['ADMIN', 'TECNICO', 'OPERARIO']), 
         lote_id,
         req.usuario.id,
         req.usuario.nombre,
-        tipo_registro,
+        tipoFinal,
         val,
         alim,
         mort,
@@ -233,9 +234,9 @@ router.post('/seguimientos', verificarAcceso(['ADMIN', 'TECNICO', 'OPERARIO']), 
   }
 });
 
-// Sincronización offline de lotes y seguimientos
 router.post('/sync', verificarAcceso(['ADMIN', 'TECNICO', 'OPERARIO']), async (req, res) => {
   const { seguimientos = [], lotes = [] } = req.body;
+  const esTecnico = req.usuario.rol === 'TECNICO';
   let client;
 
   try {
@@ -284,13 +285,15 @@ router.post('/sync', verificarAcceso(['ADMIN', 'TECNICO', 'OPERARIO']), async (r
       const existeSeg = await client.query(`SELECT id FROM seguimientos WHERE id = $1`, [s.id]);
       if (existeSeg.rows.length > 0) continue;
 
-      const mort = Math.max(0, Number(s.mortalidad || 0));
-      const ing = Math.max(0, Number(s.ingresos_animales || 0));
+      const tipoFinal = esTecnico ? 'SANIDAD' : s.tipo_registro || 'PESO_KG';
+      const mort = esTecnico ? 0 : Math.max(0, Number(s.mortalidad || 0));
+      const ing = esTecnico ? 0 : Math.max(0, Number(s.ingresos_animales || 0));
       const val = Number(s.valor_principal || 0);
+      const alim = esTecnico ? 0 : Number(s.alimento_kg || 0);
       const lote = loteRes.rows[0];
       const nuevaCant = Math.max(0, Number(lote.cantidad_actual || 0) + ing - mort);
       const nuevoPesoFinal =
-        s.tipo_registro === 'PESO_KG' && val > 0 ? val : Number(lote.peso_final_kg || 0);
+        tipoFinal === 'PESO_KG' && val > 0 ? val : Number(lote.peso_final_kg || 0);
 
       await client.query(
         `UPDATE lotes SET cantidad_actual = $1, peso_final_kg = $2 WHERE id = $3`,
@@ -309,9 +312,9 @@ router.post('/sync', verificarAcceso(['ADMIN', 'TECNICO', 'OPERARIO']), async (r
           s.lote_id,
           req.usuario.id,
           s.autor_nombre || req.usuario.nombre,
-          s.tipo_registro || 'PESO_KG',
+          tipoFinal,
           val,
-          Number(s.alimento_kg || 0),
+          alim,
           mort,
           ing,
           String(s.observaciones || '').trim(),
