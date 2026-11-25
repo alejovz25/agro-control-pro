@@ -1,13 +1,12 @@
 const express = require('express');
-const fs = require('fs');
-const path = require('path');
 const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
 const { v4: uuidv4 } = require('uuid');
 const db = require('../config/db');
 const { verificarAcceso } = require('../middlewares/auth');
 
 const router = express.Router();
-
 const uploadDir = path.join(__dirname, '../../uploads');
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
@@ -15,97 +14,166 @@ if (!fs.existsSync(uploadDir)) {
 
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, uploadDir),
-  filename: (_req, file, cb) => {
-    const ext = path.extname(file.originalname) || '.bin';
-    cb(null, `${Date.now()}-${uuidv4()}${ext}`);
+  filename: (_req, file, cb) => cb(null, `${Date.now()}-${file.originalname.replace(/\s+/g, '_')}`)
+});
+const upload = multer({ storage });
+
+// Consultar todos los movimientos financieros (gastos, compras y ventas)
+router.get('/movimientos', verificarAcceso(['ADMIN', 'TECNICO']), async (req, res) => {
+  try {
+    const { rows } = await db.query(
+      `SELECT m.*, l.codigo AS lote_codigo, l.nombre AS lote_nombre
+       FROM movimientos_contables m
+       LEFT JOIN lotes l ON l.id = m.lote_id
+       WHERE m.empresa_id = $1
+       ORDER BY m.fecha DESC, m.creado_en DESC`,
+      [req.usuario.empresa_id]
+    );
+    return res.json(rows);
+  } catch (err) {
+    console.error('Error consultando movimientos:', err);
+    return res.status(500).json({ error: 'Error al consultar movimientos financieros' });
   }
 });
 
-const upload = multer({
-  storage,
-  limits: { fileSize: 10 * 1024 * 1024 } // 10 MB
-});
-
-// Listar gastos/movimientos contables de la empresa (ADMIN y TECNICO)
+// Alias compatible /gastos
 router.get('/gastos', verificarAcceso(['ADMIN', 'TECNICO']), async (req, res) => {
   try {
     const { rows } = await db.query(
-      `SELECT * FROM movimientos_contables
-       WHERE empresa_id = $1
-       ORDER BY fecha DESC`,
+      `SELECT m.*, l.codigo AS lote_codigo, l.nombre AS lote_nombre
+       FROM movimientos_contables m
+       LEFT JOIN lotes l ON l.id = m.lote_id
+       WHERE m.empresa_id = $1
+       ORDER BY m.fecha DESC, m.creado_en DESC`,
       [req.usuario.empresa_id]
     );
-    res.json(rows);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
+    return res.json(rows);
+  } catch (err) {
+    console.error('Error consultando gastos:', err);
+    return res.status(500).json({ error: 'Error al consultar gastos' });
   }
 });
 
-// Registrar gasto con archivo adjunto (SOLO ADMIN)
+// Crear movimiento financiero (GASTO o VENTA) con factura opcional
 router.post('/gastos', verificarAcceso(['ADMIN']), upload.single('factura'), async (req, res) => {
-  const { id, lote_id, categoria, descripcion, monto, fecha } = req.body;
+  const {
+    id,
+    lote_id,
+    tipo = 'GASTO',
+    categoria,
+    descripcion,
+    monto,
+    fecha
+  } = req.body;
 
-  if (!categoria || !descripcion || !monto || !fecha) {
-    return res.status(400).json({ error: 'Categoría, descripción, monto y fecha son requeridos' });
+  if (!descripcion || monto === undefined) {
+    return res.status(400).json({ error: 'Descripción y monto son obligatorios' });
   }
 
-  const gastoId = id || uuidv4();
+  const movId = id || uuidv4();
+  const tipoNormalizado = ['GASTO', 'COMPRA', 'VENTA'].includes(String(tipo).toUpperCase())
+    ? String(tipo).toUpperCase()
+    : 'GASTO';
+  const montoNum = Number(monto || 0);
   const urlFactura = req.file ? `/uploads/${req.file.filename}` : null;
+  const fechaMov = fecha || new Date().toISOString().slice(0, 10);
 
+  let client;
   try {
-    const { rows } = await db.query(
-      `INSERT INTO movimientos_contables
-        (id, empresa_id, lote_id, categoria, descripcion, monto, url_factura, fecha, creado_por)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-       ON CONFLICT (id) DO NOTHING
-       RETURNING *`,
+    client = await db.connect();
+    await client.query('BEGIN');
+
+    const { rows } = await client.query(
+      `INSERT INTO movimientos_contables (
+        id, empresa_id, lote_id, tipo, categoria, descripcion, monto, url_factura, fecha, creado_por
+      )
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+      ON CONFLICT (id) DO UPDATE SET
+        tipo = EXCLUDED.tipo,
+        categoria = EXCLUDED.categoria,
+        descripcion = EXCLUDED.descripcion,
+        monto = EXCLUDED.monto,
+        fecha = EXCLUDED.fecha
+      RETURNING *`,
       [
-        gastoId,
+        movId,
         req.usuario.empresa_id,
         lote_id || null,
-        categoria,
-        descripcion.trim(),
-        Number(monto),
+        tipoNormalizado,
+        categoria || 'GENERAL',
+        String(descripcion).trim(),
+        montoNum,
         urlFactura,
-        fecha,
+        fechaMov,
         req.usuario.id
       ]
     );
 
-    res.status(201).json(rows[0] || { id: gastoId, duplicado: true });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
+    if (lote_id && tipoNormalizado === 'VENTA') {
+      await client.query(
+        `UPDATE lotes
+         SET valor_venta_total = COALESCE(valor_venta_total, 0) + $1
+         WHERE id = $2 AND empresa_id = $3`,
+        [montoNum, lote_id, req.usuario.empresa_id]
+      );
+    }
+
+    await client.query('COMMIT');
+    return res.status(201).json(rows[0]);
+  } catch (err) {
+    if (client) await client.query('ROLLBACK').catch(() => {});
+    console.error('Error registrando movimiento:', err);
+    return res.status(500).json({ error: 'Error al registrar movimiento financiero' });
+  } finally {
+    if (client) client.release();
   }
 });
 
-// Sincronización de gastos offline en lote (SOLO ADMIN)
+// Sincronización masiva offline de movimientos financieros
 router.post('/sync', verificarAcceso(['ADMIN']), async (req, res) => {
-  const { gastos = [] } = req.body;
+  const { gastos = [], movimientos = [] } = req.body;
+  const lista = movimientos.length > 0 ? movimientos : gastos;
 
+  let client;
   try {
-    for (const g of gastos) {
-      await db.query(
-        `INSERT INTO movimientos_contables
-          (id, empresa_id, lote_id, categoria, descripcion, monto, url_factura, fecha, creado_por)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-         ON CONFLICT (id) DO NOTHING`,
+    client = await db.connect();
+    await client.query('BEGIN');
+
+    for (const m of lista) {
+      if (!m?.id) continue;
+      const tipoNormalizado = ['GASTO', 'COMPRA', 'VENTA'].includes(String(m.tipo || '').toUpperCase())
+        ? String(m.tipo).toUpperCase()
+        : 'GASTO';
+
+      await client.query(
+        `INSERT INTO movimientos_contables (
+          id, empresa_id, lote_id, tipo, categoria, descripcion, monto, url_factura, fecha, creado_por
+        )
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+        ON CONFLICT (id) DO NOTHING`,
         [
-          g.id || uuidv4(),
+          m.id,
           req.usuario.empresa_id,
-          g.lote_id || null,
-          g.categoria,
-          g.descripcion,
-          Number(g.monto),
-          g.url_factura || null,
-          g.fecha,
+          m.lote_id || null,
+          tipoNormalizado,
+          m.categoria || 'GENERAL',
+          String(m.descripcion || 'Movimiento offline').trim(),
+          Number(m.monto || 0),
+          m.url_factura || null,
+          m.fecha || new Date().toISOString().slice(0, 10),
           req.usuario.id
         ]
       );
     }
 
-    res.json({ sincronizado: true, total: gastos.length });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
+    await client.query('COMMIT');
+    return res.json({ ok: true, sincronizados: lista.length });
+  } catch (err) {
+    if (client) await client.query('ROLLBACK').catch(() => {});
+    console.error('Error en /finanzas/sync:', err);
+    return res.status(500).json({ error: 'Error al sincronizar movimientos financieros' });
+  } finally {
+    if (client) client.release();
   }
 });
 
