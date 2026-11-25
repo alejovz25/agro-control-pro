@@ -116,7 +116,7 @@ export default function App() {
   });
 
   const [online, setOnline] = useState(() => navigator.onLine);
-  const [vistaActiva, setVistaActiva] = useState('operacion'); // 'operacion' | 'reportes' | 'finanzas'
+  const [vistaActiva, setVistaActiva] = useState('operacion');
   const [loteSeleccionadoId, setLoteSeleccionadoId] = useState(null);
   const [mostrarModalTrabajador, setMostrarModalTrabajador] = useState(false);
   const [sincronizando, setSincronizando] = useState(false);
@@ -126,7 +126,10 @@ export default function App() {
   const [movimientos, setMovimientos] = useState([]);
   const [seguimientos, setSeguimientos] = useState([]);
 
-  // Crear lote: peso inicial por animal al crear + costo de compra inicial
+  const rolUsuario = String(usuario?.rol || 'OPERARIO').toUpperCase();
+  const esAdmin = rolUsuario === 'ADMIN';
+  const esTecnico = rolUsuario === 'TECNICO';
+
   const [nuevoLote, setNuevoLote] = useState({
     codigo: '',
     nombre: '',
@@ -137,10 +140,9 @@ export default function App() {
     fecha_inicio: new Date().toISOString().slice(0, 10)
   });
 
-  // Registro diario
   const [nuevoSeg, setNuevoSeg] = useState({
     lote_id: '',
-    tipo_registro: 'PESO_KG',
+    tipo_registro: esTecnico ? 'SANIDAD' : 'PESO_KG',
     valor_principal: '',
     alimento_kg: '',
     ingresos_animales: '0',
@@ -149,7 +151,13 @@ export default function App() {
     fecha_registro: new Date().toISOString().slice(0, 10)
   });
 
-  // Movimientos financieros (GASTO, COMPRA, VENTA con cantidad de animales y peso final)
+  useEffect(() => {
+    setNuevoSeg((prev) => ({
+      ...prev,
+      tipo_registro: esTecnico ? 'SANIDAD' : prev.tipo_registro === 'SANIDAD' && !esAdmin ? 'PESO_KG' : prev.tipo_registro
+    }));
+  }, [esTecnico, esAdmin]);
+
   const [nuevoMov, setNuevoMov] = useState({
     lote_id: '',
     tipo: 'VENTA',
@@ -295,7 +303,7 @@ export default function App() {
 
   const handleCrearLote = async (e) => {
     e.preventDefault();
-    if (usuario?.rol !== 'ADMIN') return;
+    if (!esAdmin) return;
 
     const cantIni = Math.max(0, Number(nuevoLote.cantidad_inicial || 0));
     const pesoIniAnimal = Number(nuevoLote.peso_inicial_animal_kg || 0);
@@ -321,7 +329,7 @@ export default function App() {
     const movCompra =
       costoCompra > 0
         ? {
-            id: `compra-${lotePayload.id}`,
+            id: uuidv4(),
             lote_id: lotePayload.id,
             lote_codigo: lotePayload.codigo,
             lote_nombre: lotePayload.nombre,
@@ -383,15 +391,16 @@ export default function App() {
     e.preventDefault();
     const targetLoteId = loteForzadoId || nuevoSeg.lote_id || lotes[0]?.id || '';
     if (!targetLoteId) {
-      setMensajeEstado('Selecciona o crea un lote antes de registrar el seguimiento.');
+      setMensajeEstado('Selecciona o crea un lote antes de registrar.');
       return;
     }
 
     const loteObj = lotes.find((l) => l.id === targetLoteId);
-    const mort = Math.max(0, Number(nuevoSeg.mortalidad || 0));
-    const ing = Math.max(0, Number(nuevoSeg.ingresos_animales || 0));
+    const tipoFinal = esTecnico ? 'SANIDAD' : nuevoSeg.tipo_registro;
+    const mort = esTecnico ? 0 : Math.max(0, Number(nuevoSeg.mortalidad || 0));
+    const ing = esTecnico ? 0 : Math.max(0, Number(nuevoSeg.ingresos_animales || 0));
     const val = Number(nuevoSeg.valor_principal || 0);
-    const alim = Number(nuevoSeg.alimento_kg || 0);
+    const alim = esTecnico ? 0 : Number(nuevoSeg.alimento_kg || 0);
     const cantActualPrevia = Number(loteObj?.cantidad_actual ?? loteObj?.cantidad_inicial ?? 0);
     const cantActualNueva = Math.max(0, cantActualPrevia + ing - mort);
 
@@ -401,7 +410,7 @@ export default function App() {
       lote_codigo: loteObj?.codigo || '',
       lote_nombre: loteObj?.nombre || '',
       autor_nombre: usuario?.nombre || usuario?.email || 'Usuario',
-      tipo_registro: nuevoSeg.tipo_registro,
+      tipo_registro: tipoFinal,
       valor_principal: val,
       alimento_kg: alim,
       ingresos_animales: ing,
@@ -423,7 +432,7 @@ export default function App() {
         });
         if (!res.ok) {
           const errData = await res.json().catch(() => ({}));
-          throw new Error(errData.error || 'Error al guardar seguimiento');
+          throw new Error(errData.error || 'Error al guardar registro');
         }
         const dataRes = await res.json().catch(() => ({}));
         const segGuardado = {
@@ -457,7 +466,11 @@ export default function App() {
           mortalidad: '0',
           observaciones: ''
         }));
-        setMensajeEstado('Seguimiento guardado y cantidad del lote actualizada.');
+        setMensajeEstado(
+          esTecnico
+            ? 'Aplicación de sanidad / medicamento registrada.'
+            : 'Registro diario guardado y cantidad del lote actualizada.'
+        );
         return;
       }
 
@@ -485,15 +498,15 @@ export default function App() {
         mortalidad: '0',
         observaciones: ''
       }));
-      setMensajeEstado('Seguimiento guardado localmente (pendiente de sincronizar).');
+      setMensajeEstado('Registro guardado localmente (pendiente de sincronizar).');
     } catch (err) {
-      setMensajeEstado(err.message || 'Error al registrar seguimiento');
+      setMensajeEstado(err.message || 'Error al guardar registro');
     }
   };
 
   const handleRegistrarMovimiento = async (e) => {
     e.preventDefault();
-    if (usuario?.rol !== 'ADMIN') return;
+    if (!esAdmin) return;
 
     const loteObj = lotes.find((l) => l.id === nuevoMov.lote_id);
     const montoNum = Number(nuevoMov.monto || 0);
@@ -546,41 +559,6 @@ export default function App() {
         };
         setMovimientos((prev) => [movOffline, ...prev]);
         if (db.gastos) await db.gastos.put(movOffline);
-
-        if (nuevoMov.lote_id && tipoNorm === 'VENTA') {
-          setLotes((prev) =>
-            prev.map((l) =>
-              l.id === nuevoMov.lote_id
-                ? {
-                    ...l,
-                    cantidad_actual: Math.max(
-                      0,
-                      Number(l.cantidad_actual ?? l.cantidad_inicial ?? 0) - cantAnimales
-                    ),
-                    valor_venta_total: Number(l.valor_venta_total || 0) + montoNum,
-                    peso_final_kg: pesoFinal > 0 ? pesoFinal : l.peso_final_kg
-                  }
-                : l
-            )
-          );
-          const notaVenta = {
-            id: `seg-venta-${movId}`,
-            lote_id: nuevoMov.lote_id,
-            lote_codigo: loteObj?.codigo || '',
-            lote_nombre: loteObj?.nombre || '',
-            autor_nombre: usuario?.nombre || 'Admin',
-            tipo_registro: 'VENTA_ANIMAL',
-            valor_principal: pesoFinal > 0 ? pesoFinal : montoNum,
-            alimento_kg: 0,
-            ingresos_animales: 0,
-            mortalidad: 0,
-            observaciones: `Venta de ${cantAnimales} animal(es) por $${montoNum.toLocaleString()} (Peso final: ${pesoFinal} kg) - ${nuevoMov.descripcion.trim()}`,
-            fecha_registro: nuevoMov.fecha,
-            pendiente_sync: true
-          };
-          setSeguimientos((prev) => [notaVenta, ...prev]);
-          if (db.seguimientos) await db.seguimientos.put(notaVenta);
-        }
       }
 
       setNuevoMov({
@@ -594,11 +572,7 @@ export default function App() {
         fecha: new Date().toISOString().slice(0, 10),
         archivo: null
       });
-      setMensajeEstado(
-        tipoNorm === 'VENTA'
-          ? 'Venta registrada: animales descontados del lote y anotación guardada.'
-          : 'Movimiento financiero guardado.'
-      );
+      setMensajeEstado('Movimiento financiero guardado.');
     } catch (err) {
       setMensajeEstado(err.message);
     }
@@ -631,7 +605,7 @@ export default function App() {
         }
       }
 
-      if (usuario?.rol === 'ADMIN' && pendientesMov.length > 0) {
+      if (esAdmin && pendientesMov.length > 0) {
         const resMov = await fetch(`${API_URL}/api/finanzas/sync`, {
           method: 'POST',
           headers: {
@@ -660,8 +634,6 @@ export default function App() {
   }
 
   const nombreUsuario = usuario?.nombre || usuario?.email || 'Usuario';
-  const rolUsuario = usuario?.rol || 'OPERARIO';
-  const esAdmin = rolUsuario === 'ADMIN';
 
   const totalPendientes =
     lotes.filter((l) => l.pendiente_sync).length +
@@ -728,7 +700,7 @@ export default function App() {
                   onClick={() => setMostrarModalTrabajador(true)}
                   className="px-3 py-1.5 rounded-lg bg-white text-emerald-900 hover:bg-emerald-50 text-xs font-semibold"
                 >
-                  + Trabajador
+                  Equipo y Claves
                 </button>
 
                 <button
@@ -770,7 +742,7 @@ export default function App() {
                 : 'border-transparent text-slate-500 hover:text-slate-800'
             }`}
           >
-            Lotes y Control Diario
+            {esTecnico ? 'Sanidad y Medicamentos' : 'Lotes y Control Diario'}
           </button>
           <button
             type="button"
@@ -848,12 +820,16 @@ export default function App() {
         {vistaActiva === 'operacion' && (
           <>
             <section className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {/* Registro diario */}
+              {/* Formulario de Registro: TECNICO solo SANIDAD; OPERARIO/ADMIN registro diario */}
               <form
                 onSubmit={(e) => handleRegistrarSeguimiento(e, null)}
                 className="bg-white rounded-2xl p-5 shadow-sm border border-slate-200 space-y-3"
               >
-                <h2 className="text-base font-bold text-slate-800">Registro Diario de Campo</h2>
+                <h2 className="text-base font-bold text-slate-800">
+                  {esTecnico
+                    ? 'Registro de Sanidad y Aplicación de Medicamento'
+                    : 'Registro Diario de Campo'}
+                </h2>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
@@ -872,101 +848,158 @@ export default function App() {
                     </select>
                   </div>
 
-                  <div>
-                    <label className="block text-xs font-medium text-slate-600 mb-1">
-                      Tipo de Control
-                    </label>
-                    <select
-                      value={nuevoSeg.tipo_registro}
-                      onChange={(e) => setNuevoSeg({ ...nuevoSeg, tipo_registro: e.target.value })}
-                      className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
-                    >
-                      <option value="PESO_KG">Peso Promedio / Control (Kg)</option>
-                      <option value="LECHE_LITROS">Leche (Litros)</option>
-                      <option value="HUEVOS">Producción de Huevos</option>
-                      <option value="SANIDAD">Sanidad / Aplicación</option>
-                    </select>
-                  </div>
+                  {!esTecnico ? (
+                    <div>
+                      <label className="block text-xs font-medium text-slate-600 mb-1">
+                        Tipo de Control
+                      </label>
+                      <select
+                        value={nuevoSeg.tipo_registro}
+                        onChange={(e) => setNuevoSeg({ ...nuevoSeg, tipo_registro: e.target.value })}
+                        className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
+                      >
+                        <option value="PESO_KG">Peso Promedio / Control (Kg)</option>
+                        <option value="LECHE_LITROS">Leche (Litros)</option>
+                        <option value="HUEVOS">Producción de Huevos</option>
+                        {esAdmin && <option value="SANIDAD">Sanidad / Aplicación</option>}
+                      </select>
+                    </div>
+                  ) : (
+                    <div>
+                      <label className="block text-xs font-medium text-slate-600 mb-1">
+                        Tipo de Registro
+                      </label>
+                      <input
+                        type="text"
+                        readOnly
+                        value="SANIDAD / MEDICAMENTO"
+                        className="w-full border border-slate-200 bg-slate-100 rounded-lg px-3 py-2 text-sm font-semibold text-emerald-800"
+                      />
+                    </div>
+                  )}
                 </div>
 
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                  <div>
-                    <label className="block text-xs font-medium text-slate-600 mb-1">
-                      Valor (Kg/L/Und)
-                    </label>
-                    <input
-                      type="number"
-                      step="any"
-                      required
-                      value={nuevoSeg.valor_principal}
-                      onChange={(e) =>
-                        setNuevoSeg({ ...nuevoSeg, valor_principal: e.target.value })
-                      }
-                      className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
-                    />
+                {esTecnico ? (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-medium text-slate-600 mb-1">
+                        Dosis / Cantidad Aplicada
+                      </label>
+                      <input
+                        type="number"
+                        step="any"
+                        required
+                        value={nuevoSeg.valor_principal}
+                        onChange={(e) =>
+                          setNuevoSeg({ ...nuevoSeg, valor_principal: e.target.value })
+                        }
+                        placeholder="Ej. 5 (ml / dosis)"
+                        className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-600 mb-1">
+                        Medicamento / Tratamiento Aplicado
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        value={nuevoSeg.observaciones}
+                        onChange={(e) =>
+                          setNuevoSeg({ ...nuevoSeg, observaciones: e.target.value })
+                        }
+                        placeholder="Ej. Ivermectina / Vacuna aftosa"
+                        className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
+                      />
+                    </div>
                   </div>
-                  <div>
-                    <label className="block text-xs font-medium text-slate-600 mb-1">
-                      Alimento (kg)
-                    </label>
-                    <input
-                      type="number"
-                      step="any"
-                      value={nuevoSeg.alimento_kg}
-                      onChange={(e) => setNuevoSeg({ ...nuevoSeg, alimento_kg: e.target.value })}
-                      className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-slate-600 mb-1">
-                      + Ingreso / Nac.
-                    </label>
-                    <input
-                      type="number"
-                      min="0"
-                      value={nuevoSeg.ingresos_animales}
-                      onChange={(e) =>
-                        setNuevoSeg({ ...nuevoSeg, ingresos_animales: e.target.value })
-                      }
-                      className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-slate-600 mb-1">
-                      - Mortalidad
-                    </label>
-                    <input
-                      type="number"
-                      min="0"
-                      value={nuevoSeg.mortalidad}
-                      onChange={(e) => setNuevoSeg({ ...nuevoSeg, mortalidad: e.target.value })}
-                      className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
-                    />
-                  </div>
-                </div>
+                ) : (
+                  <>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                      <div>
+                        <label className="block text-xs font-medium text-slate-600 mb-1">
+                          Valor (Kg/L/Und)
+                        </label>
+                        <input
+                          type="number"
+                          step="any"
+                          required
+                          value={nuevoSeg.valor_principal}
+                          onChange={(e) =>
+                            setNuevoSeg({ ...nuevoSeg, valor_principal: e.target.value })
+                          }
+                          className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-slate-600 mb-1">
+                          Alimento (kg)
+                        </label>
+                        <input
+                          type="number"
+                          step="any"
+                          value={nuevoSeg.alimento_kg}
+                          onChange={(e) =>
+                            setNuevoSeg({ ...nuevoSeg, alimento_kg: e.target.value })
+                          }
+                          className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-slate-600 mb-1">
+                          + Ingreso / Nac.
+                        </label>
+                        <input
+                          type="number"
+                          min="0"
+                          value={nuevoSeg.ingresos_animales}
+                          onChange={(e) =>
+                            setNuevoSeg({ ...nuevoSeg, ingresos_animales: e.target.value })
+                          }
+                          className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-slate-600 mb-1">
+                          - Mortalidad
+                        </label>
+                        <input
+                          type="number"
+                          min="0"
+                          value={nuevoSeg.mortalidad}
+                          onChange={(e) =>
+                            setNuevoSeg({ ...nuevoSeg, mortalidad: e.target.value })
+                          }
+                          className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
+                        />
+                      </div>
+                    </div>
 
-                <div>
-                  <label className="block text-xs font-medium text-slate-600 mb-1">
-                    Observaciones / Anotaciones
-                  </label>
-                  <input
-                    type="text"
-                    value={nuevoSeg.observaciones}
-                    onChange={(e) => setNuevoSeg({ ...nuevoSeg, observaciones: e.target.value })}
-                    placeholder="Escribe novedades visibles para el administrador y equipo"
-                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
-                  />
-                </div>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-600 mb-1">
+                        Observaciones / Anotaciones
+                      </label>
+                      <input
+                        type="text"
+                        value={nuevoSeg.observaciones}
+                        onChange={(e) =>
+                          setNuevoSeg({ ...nuevoSeg, observaciones: e.target.value })
+                        }
+                        placeholder="Escribe novedades visibles para el administrador y equipo"
+                        className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
+                      />
+                    </div>
+                  </>
+                )}
 
                 <button
                   type="submit"
                   className="w-full bg-emerald-700 hover:bg-emerald-800 text-white font-semibold py-2 rounded-lg text-sm"
                 >
-                  Guardar Seguimiento
+                  {esTecnico ? 'Guardar Sanidad / Medicamento' : 'Guardar Registro Diario'}
                 </button>
               </form>
 
-              {/* Crear lote: peso inicial por animal al crear + compra */}
               {esAdmin ? (
                 <form
                   onSubmit={handleCrearLote}
@@ -1051,10 +1084,13 @@ export default function App() {
                 </form>
               ) : (
                 <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-200 flex flex-col justify-center">
-                  <h2 className="text-base font-bold text-slate-800 mb-1">Panel Operativo</h2>
+                  <h2 className="text-base font-bold text-slate-800 mb-1">
+                    {esTecnico ? 'Panel Técnico Veterinario' : 'Panel de Operario'}
+                  </h2>
                   <p className="text-sm text-slate-600">
-                    Haz clic en cualquier lote de la tabla para abrir su detalle, hacer registro
-                    diario o revisar sus anotaciones y gráficas.
+                    {esTecnico
+                      ? 'Como Técnico Veterinario puedes registrar la sanidad y aplicación de medicamentos por lote y consultar reportes y gráficas.'
+                      : 'Como Operario puedes realizar el registro diario de campo (producción/peso, alimento, ingresos, mortalidad y observaciones).'}
                   </p>
                 </div>
               )}
@@ -1213,7 +1249,7 @@ export default function App() {
 
             <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-200 space-y-3">
               <h2 className="text-base font-bold text-slate-800">
-                Anotaciones y Observaciones de Empleados
+                Anotaciones, Sanidad y Observaciones del Equipo
               </h2>
               {seguimientos.length === 0 ? (
                 <p className="text-sm text-slate-500">No hay observaciones registradas.</p>
@@ -1258,7 +1294,12 @@ export default function App() {
                     setNuevoMov({
                       ...nuevoMov,
                       tipo: t,
-                      categoria: t === 'VENTA' ? 'VENTA_ANIMAL' : t === 'COMPRA' ? 'COMPRA_LOTE' : 'ALIMENTO'
+                      categoria:
+                        t === 'VENTA'
+                          ? 'VENTA_ANIMAL'
+                          : t === 'COMPRA'
+                            ? 'COMPRA_LOTE'
+                            : 'ALIMENTO'
                     });
                   }}
                   className="border border-slate-300 rounded-lg px-3 py-2 text-sm"
@@ -1325,7 +1366,7 @@ export default function App() {
                 <input
                   type="text"
                   required
-                  placeholder="Descripción del movimiento (ej. Venta de novillo en feria)"
+                  placeholder="Descripción del movimiento"
                   value={nuevoMov.descripcion}
                   onChange={(e) => setNuevoMov({ ...nuevoMov, descripcion: e.target.value })}
                   className="border border-slate-300 rounded-lg px-3 py-2 text-sm"
@@ -1446,54 +1487,90 @@ export default function App() {
               className="bg-slate-50 rounded-xl p-4 border border-slate-200 space-y-3"
             >
               <h3 className="text-sm font-bold text-slate-800">
-                Nuevo Registro Diario en este Lote
+                {esTecnico
+                  ? 'Registrar Sanidad / Medicamento en este Lote'
+                  : 'Nuevo Registro Diario en este Lote'}
               </h3>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                <select
-                  value={nuevoSeg.tipo_registro}
-                  onChange={(e) => setNuevoSeg({ ...nuevoSeg, tipo_registro: e.target.value })}
-                  className="border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs bg-white"
-                >
-                  <option value="PESO_KG">Peso (Kg)</option>
-                  <option value="LECHE_LITROS">Leche (L)</option>
-                  <option value="HUEVOS">Huevos</option>
-                  <option value="SANIDAD">Sanidad</option>
-                </select>
-                <input
-                  type="number"
-                  step="any"
-                  required
-                  placeholder="Valor"
-                  value={nuevoSeg.valor_principal}
-                  onChange={(e) => setNuevoSeg({ ...nuevoSeg, valor_principal: e.target.value })}
-                  className="border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs bg-white"
-                />
-                <input
-                  type="number"
-                  min="0"
-                  placeholder="+ Ingreso"
-                  value={nuevoSeg.ingresos_animales}
-                  onChange={(e) =>
-                    setNuevoSeg({ ...nuevoSeg, ingresos_animales: e.target.value })
-                  }
-                  className="border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs bg-white"
-                />
-                <input
-                  type="number"
-                  min="0"
-                  placeholder="- Mortalidad"
-                  value={nuevoSeg.mortalidad}
-                  onChange={(e) => setNuevoSeg({ ...nuevoSeg, mortalidad: e.target.value })}
-                  className="border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs bg-white"
-                />
-              </div>
-              <input
-                type="text"
-                placeholder="Observaciones o novedades del lote"
-                value={nuevoSeg.observaciones}
-                onChange={(e) => setNuevoSeg({ ...nuevoSeg, observaciones: e.target.value })}
-                className="w-full border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs bg-white"
-              />
+              {esTecnico ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <input
+                    type="number"
+                    step="any"
+                    required
+                    placeholder="Dosis / Valor aplicado"
+                    value={nuevoSeg.valor_principal}
+                    onChange={(e) =>
+                      setNuevoSeg({ ...nuevoSeg, valor_principal: e.target.value })
+                    }
+                    className="border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs bg-white"
+                  />
+                  <input
+                    type="text"
+                    required
+                    placeholder="Medicamento y observaciones"
+                    value={nuevoSeg.observaciones}
+                    onChange={(e) =>
+                      setNuevoSeg({ ...nuevoSeg, observaciones: e.target.value })
+                    }
+                    className="border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs bg-white"
+                  />
+                </div>
+              ) : (
+                <>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    <select
+                      value={nuevoSeg.tipo_registro}
+                      onChange={(e) => setNuevoSeg({ ...nuevoSeg, tipo_registro: e.target.value })}
+                      className="border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs bg-white"
+                    >
+                      <option value="PESO_KG">Peso (Kg)</option>
+                      <option value="LECHE_LITROS">Leche (L)</option>
+                      <option value="HUEVOS">Huevos</option>
+                      {esAdmin && <option value="SANIDAD">Sanidad</option>}
+                    </select>
+                    <input
+                      type="number"
+                      step="any"
+                      required
+                      placeholder="Valor"
+                      value={nuevoSeg.valor_principal}
+                      onChange={(e) =>
+                        setNuevoSeg({ ...nuevoSeg, valor_principal: e.target.value })
+                      }
+                      className="border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs bg-white"
+                    />
+                    <input
+                      type="number"
+                      min="0"
+                      placeholder="+ Ingreso"
+                      value={nuevoSeg.ingresos_animales}
+                      onChange={(e) =>
+                        setNuevoSeg({ ...nuevoSeg, ingresos_animales: e.target.value })
+                      }
+                      className="border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs bg-white"
+                    />
+                    <input
+                      type="number"
+                      min="0"
+                      placeholder="- Mortalidad"
+                      value={nuevoSeg.mortalidad}
+                      onChange={(e) =>
+                        setNuevoSeg({ ...nuevoSeg, mortalidad: e.target.value })
+                      }
+                      className="border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs bg-white"
+                    />
+                  </div>
+                  <input
+                    type="text"
+                    placeholder="Observaciones o novedades del lote"
+                    value={nuevoSeg.observaciones}
+                    onChange={(e) =>
+                      setNuevoSeg({ ...nuevoSeg, observaciones: e.target.value })
+                    }
+                    className="w-full border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs bg-white"
+                  />
+                </>
+              )}
               <button
                 type="submit"
                 className="w-full bg-emerald-700 hover:bg-emerald-800 text-white font-semibold py-2 rounded-lg text-xs"
