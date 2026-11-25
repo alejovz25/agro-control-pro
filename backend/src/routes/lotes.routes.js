@@ -5,7 +5,6 @@ const { verificarAcceso } = require('../middlewares/auth');
 
 const router = express.Router();
 
-// Listar lotes de la empresa
 router.get('/', verificarAcceso(['ADMIN', 'TECNICO', 'OPERARIO']), async (req, res) => {
   try {
     const { rows } = await db.query(
@@ -19,7 +18,6 @@ router.get('/', verificarAcceso(['ADMIN', 'TECNICO', 'OPERARIO']), async (req, r
   }
 });
 
-// Listar todos los seguimientos / observaciones de la empresa
 router.get('/seguimientos', verificarAcceso(['ADMIN', 'TECNICO', 'OPERARIO']), async (req, res) => {
   try {
     const { rows } = await db.query(
@@ -37,7 +35,7 @@ router.get('/seguimientos', verificarAcceso(['ADMIN', 'TECNICO', 'OPERARIO']), a
   }
 });
 
-// Crear lote (ADMIN) + registrar movimiento de compra si aplica
+// Crear lote con peso inicial por animal y compra inicial
 router.post('/', verificarAcceso(['ADMIN']), async (req, res) => {
   const {
     id,
@@ -46,7 +44,7 @@ router.post('/', verificarAcceso(['ADMIN']), async (req, res) => {
     especie,
     cantidad_inicial,
     cantidad_actual,
-    peso_inicial_kg = 0,
+    peso_inicial_animal_kg = 0,
     peso_final_kg = 0,
     costo_compra_total = 0,
     valor_venta_total = 0,
@@ -59,9 +57,10 @@ router.post('/', verificarAcceso(['ADMIN']), async (req, res) => {
   }
 
   const loteId = id || uuidv4();
-  const cantIni = Number(cantidad_inicial || 0);
-  const cantAct = cantidad_actual !== undefined ? Number(cantidad_actual) : cantIni;
-  const pesoIni = Number(peso_inicial_kg || 0);
+  const cantIni = Math.max(0, Number(cantidad_inicial || 0));
+  const cantAct =
+    cantidad_actual !== undefined ? Math.max(0, Number(cantidad_actual)) : cantIni;
+  const pesoIniAnimal = Number(peso_inicial_animal_kg || 0);
   const pesoFin = Number(peso_final_kg || 0);
   const costoCompra = Number(costo_compra_total || 0);
   const valorVenta = Number(valor_venta_total || 0);
@@ -74,7 +73,7 @@ router.post('/', verificarAcceso(['ADMIN']), async (req, res) => {
     const { rows } = await client.query(
       `INSERT INTO lotes (
         id, empresa_id, codigo, nombre, especie, cantidad_inicial, cantidad_actual,
-        peso_inicial_kg, peso_final_kg, costo_compra_total, valor_venta_total,
+        peso_inicial_animal_kg, peso_final_kg, costo_compra_total, valor_venta_total,
         fecha_inicio, estado
       )
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
@@ -83,7 +82,7 @@ router.post('/', verificarAcceso(['ADMIN']), async (req, res) => {
         nombre = EXCLUDED.nombre,
         especie = EXCLUDED.especie,
         cantidad_actual = EXCLUDED.cantidad_actual,
-        peso_inicial_kg = EXCLUDED.peso_inicial_kg,
+        peso_inicial_animal_kg = EXCLUDED.peso_inicial_animal_kg,
         peso_final_kg = EXCLUDED.peso_final_kg,
         costo_compra_total = EXCLUDED.costo_compra_total,
         valor_venta_total = EXCLUDED.valor_venta_total,
@@ -97,7 +96,7 @@ router.post('/', verificarAcceso(['ADMIN']), async (req, res) => {
         String(especie).trim(),
         cantIni,
         cantAct,
-        pesoIni,
+        pesoIniAnimal,
         pesoFin,
         costoCompra,
         valorVenta,
@@ -109,35 +108,18 @@ router.post('/', verificarAcceso(['ADMIN']), async (req, res) => {
     if (costoCompra > 0) {
       await client.query(
         `INSERT INTO movimientos_contables (
-          id, empresa_id, lote_id, tipo, categoria, descripcion, monto, fecha, creado_por
+          id, empresa_id, lote_id, tipo, categoria, descripcion, cantidad_animales,
+          peso_final_kg, monto, fecha, creado_por
         )
-        VALUES ($1,$2,$3,'COMPRA','COMPRA_LOTE',$4,$5,$6,$7)
-        ON CONFLICT (id) DO NOTHING`,
+        VALUES ($1,$2,$3,'COMPRA','COMPRA_LOTE',$4,$5,0,$6,$7,$8)
+        ON CONFLICT (id) DO UPDATE SET monto = EXCLUDED.monto`,
         [
           `compra-${loteId}`,
           req.usuario.empresa_id,
           loteId,
-          `Compra inicial lote ${String(codigo).trim()} - ${String(nombre).trim()}`,
+          `Compra lote ${String(codigo).trim()} - ${String(nombre).trim()}`,
+          cantIni,
           costoCompra,
-          fecha_inicio,
-          req.usuario.id
-        ]
-      );
-    }
-
-    if (valorVenta > 0) {
-      await client.query(
-        `INSERT INTO movimientos_contables (
-          id, empresa_id, lote_id, tipo, categoria, descripcion, monto, fecha, creado_por
-        )
-        VALUES ($1,$2,$3,'VENTA','VENTA_LOTE',$4,$5,$6,$7)
-        ON CONFLICT (id) DO NOTHING`,
-        [
-          `venta-${loteId}`,
-          req.usuario.empresa_id,
-          loteId,
-          `Venta lote ${String(codigo).trim()} - ${String(nombre).trim()}`,
-          valorVenta,
           fecha_inicio,
           req.usuario.id
         ]
@@ -155,76 +137,7 @@ router.post('/', verificarAcceso(['ADMIN']), async (req, res) => {
   }
 });
 
-// Actualizar lote (peso final, valor de venta, estado, etc.)
-router.patch('/:id', verificarAcceso(['ADMIN', 'TECNICO']), async (req, res) => {
-  const { id } = req.params;
-  const { peso_final_kg, valor_venta_total, costo_compra_total, estado } = req.body;
-
-  let client;
-  try {
-    client = await db.connect();
-    await client.query('BEGIN');
-
-    const actualRes = await client.query(
-      `SELECT * FROM lotes WHERE id = $1 AND empresa_id = $2`,
-      [id, req.usuario.empresa_id]
-    );
-    if (actualRes.rows.length === 0) {
-      await client.query('ROLLBACK');
-      return res.status(404).json({ error: 'Lote no encontrado' });
-    }
-
-    const actual = actualRes.rows[0];
-    const nuevoPesoFinal =
-      peso_final_kg !== undefined ? Number(peso_final_kg) : Number(actual.peso_final_kg || 0);
-    const nuevaVenta =
-      valor_venta_total !== undefined
-        ? Number(valor_venta_total)
-        : Number(actual.valor_venta_total || 0);
-    const nuevaCompra =
-      costo_compra_total !== undefined
-        ? Number(costo_compra_total)
-        : Number(actual.costo_compra_total || 0);
-    const nuevoEstado = estado || actual.estado;
-
-    const { rows } = await client.query(
-      `UPDATE lotes
-       SET peso_final_kg = $1, valor_venta_total = $2, costo_compra_total = $3, estado = $4
-       WHERE id = $5 AND empresa_id = $6
-       RETURNING *`,
-      [nuevoPesoFinal, nuevaVenta, nuevaCompra, nuevoEstado, id, req.usuario.empresa_id]
-    );
-
-    if (nuevaVenta > 0) {
-      await client.query(
-        `INSERT INTO movimientos_contables (
-          id, empresa_id, lote_id, tipo, categoria, descripcion, monto, fecha, creado_por
-        )
-        VALUES ($1,$2,$3,'VENTA','VENTA_LOTE',$4,$5,CURRENT_DATE,$6)
-        ON CONFLICT (id) DO UPDATE SET monto = EXCLUDED.monto`,
-        [
-          `venta-${id}`,
-          req.usuario.empresa_id,
-          id,
-          `Venta lote ${actual.codigo} - ${actual.nombre}`,
-          nuevaVenta,
-          req.usuario.id
-        ]
-      );
-    }
-
-    await client.query('COMMIT');
-    return res.json(rows[0]);
-  } catch (err) {
-    if (client) await client.query('ROLLBACK').catch(() => {});
-    console.error('Error actualizando lote:', err);
-    return res.status(500).json({ error: 'Error al actualizar lote' });
-  } finally {
-    if (client) client.release();
-  }
-});
-
-// Registrar seguimiento diario y ajustar cantidad_actual por mortalidad / ingresos_animales
+// Registrar seguimiento diario y descontar mortalidad / sumar ingresos en el lote
 router.post('/seguimientos', verificarAcceso(['ADMIN', 'TECNICO', 'OPERARIO']), async (req, res) => {
   const {
     id,
@@ -319,7 +232,7 @@ router.post('/seguimientos', verificarAcceso(['ADMIN', 'TECNICO', 'OPERARIO']), 
   }
 });
 
-// Sincronización masiva offline de seguimientos (y lotes si vienen pendientes)
+// Sincronización offline de lotes y seguimientos
 router.post('/sync', verificarAcceso(['ADMIN', 'TECNICO', 'OPERARIO']), async (req, res) => {
   const { seguimientos = [], lotes = [] } = req.body;
   let client;
@@ -333,11 +246,14 @@ router.post('/sync', verificarAcceso(['ADMIN', 'TECNICO', 'OPERARIO']), async (r
       await client.query(
         `INSERT INTO lotes (
           id, empresa_id, codigo, nombre, especie, cantidad_inicial, cantidad_actual,
-          peso_inicial_kg, peso_final_kg, costo_compra_total, valor_venta_total,
+          peso_inicial_animal_kg, peso_final_kg, costo_compra_total, valor_venta_total,
           fecha_inicio, estado
         )
         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
-        ON CONFLICT (id) DO NOTHING`,
+        ON CONFLICT (id) DO UPDATE SET
+          cantidad_actual = EXCLUDED.cantidad_actual,
+          peso_final_kg = EXCLUDED.peso_final_kg,
+          valor_venta_total = EXCLUDED.valor_venta_total`,
         [
           l.id,
           req.usuario.empresa_id,
@@ -346,7 +262,7 @@ router.post('/sync', verificarAcceso(['ADMIN', 'TECNICO', 'OPERARIO']), async (r
           l.especie,
           Number(l.cantidad_inicial || 0),
           Number(l.cantidad_actual ?? l.cantidad_inicial ?? 0),
-          Number(l.peso_inicial_kg || 0),
+          Number(l.peso_inicial_animal_kg || 0),
           Number(l.peso_final_kg || 0),
           Number(l.costo_compra_total || 0),
           Number(l.valor_venta_total || 0),
@@ -392,7 +308,7 @@ router.post('/sync', verificarAcceso(['ADMIN', 'TECNICO', 'OPERARIO']), async (r
           s.lote_id,
           req.usuario.id,
           s.autor_nombre || req.usuario.nombre,
-          s.tipo_registro || 'LECHE_LITROS',
+          s.tipo_registro || 'PESO_KG',
           val,
           Number(s.alimento_kg || 0),
           mort,
