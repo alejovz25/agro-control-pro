@@ -35,6 +35,7 @@ function borrarSeguro(clave) {
 function GraficaLote({ registros = [] }) {
   const puntos = useMemo(() => {
     const ordenados = [...registros]
+      .filter((r) => r.tipo_registro !== 'SANIDAD')
       .sort((a, b) => String(a.fecha_registro || '').localeCompare(String(b.fecha_registro || '')))
       .slice(-10);
     return ordenados.map((r, idx) => ({
@@ -48,7 +49,7 @@ function GraficaLote({ registros = [] }) {
   if (puntos.length === 0) {
     return (
       <p className="text-xs text-slate-500 py-6 text-center">
-        Aún no hay registros diarios para graficar en este lote.
+        Aún no hay registros numéricos para graficar en este lote.
       </p>
     );
   }
@@ -154,7 +155,11 @@ export default function App() {
   useEffect(() => {
     setNuevoSeg((prev) => ({
       ...prev,
-      tipo_registro: esTecnico ? 'SANIDAD' : prev.tipo_registro === 'SANIDAD' && !esAdmin ? 'PESO_KG' : prev.tipo_registro
+      tipo_registro: esTecnico
+        ? 'SANIDAD'
+        : prev.tipo_registro === 'SANIDAD' && !esAdmin
+          ? 'PESO_KG'
+          : prev.tipo_registro
     }));
   }, [esTecnico, esAdmin]);
 
@@ -397,10 +402,11 @@ export default function App() {
 
     const loteObj = lotes.find((l) => l.id === targetLoteId);
     const tipoFinal = esTecnico ? 'SANIDAD' : nuevoSeg.tipo_registro;
-    const mort = esTecnico ? 0 : Math.max(0, Number(nuevoSeg.mortalidad || 0));
-    const ing = esTecnico ? 0 : Math.max(0, Number(nuevoSeg.ingresos_animales || 0));
-    const val = Number(nuevoSeg.valor_principal || 0);
-    const alim = esTecnico ? 0 : Number(nuevoSeg.alimento_kg || 0);
+    const esSanidad = tipoFinal === 'SANIDAD';
+    const mort = esSanidad ? 0 : Math.max(0, Number(nuevoSeg.mortalidad || 0));
+    const ing = esSanidad ? 0 : Math.max(0, Number(nuevoSeg.ingresos_animales || 0));
+    const val = esSanidad ? 0 : Number(nuevoSeg.valor_principal || 0);
+    const alim = esSanidad ? 0 : Number(nuevoSeg.alimento_kg || 0);
     const cantActualPrevia = Number(loteObj?.cantidad_actual ?? loteObj?.cantidad_inicial ?? 0);
     const cantActualNueva = Math.max(0, cantActualPrevia + ing - mort);
 
@@ -467,7 +473,7 @@ export default function App() {
           observaciones: ''
         }));
         setMensajeEstado(
-          esTecnico
+          esSanidad
             ? 'Aplicación de sanidad / medicamento registrada.'
             : 'Registro diario guardado y cantidad del lote actualizada.'
         );
@@ -634,6 +640,7 @@ export default function App() {
   }
 
   const nombreUsuario = usuario?.nombre || usuario?.email || 'Usuario';
+  const esFormularioSanidad = esTecnico || nuevoSeg.tipo_registro === 'SANIDAD';
 
   const totalPendientes =
     lotes.filter((l) => l.pendiente_sync).length +
@@ -820,7 +827,7 @@ export default function App() {
         {vistaActiva === 'operacion' && (
           <>
             <section className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {/* Formulario de Registro: TECNICO solo SANIDAD; OPERARIO/ADMIN registro diario */}
+              {/* Formulario de Registro: SANIDAD sin valor numérico */}
               <form
                 onSubmit={(e) => handleRegistrarSeguimiento(e, null)}
                 className="bg-white rounded-2xl p-5 shadow-sm border border-slate-200 space-y-3"
@@ -861,7 +868,7 @@ export default function App() {
                         <option value="PESO_KG">Peso Promedio / Control (Kg)</option>
                         <option value="LECHE_LITROS">Leche (Litros)</option>
                         <option value="HUEVOS">Producción de Huevos</option>
-                        {esAdmin && <option value="SANIDAD">Sanidad / Aplicación</option>}
+                        {esAdmin && <option value="SANIDAD">Sanidad / Medicamento</option>}
                       </select>
                     </div>
                   ) : (
@@ -879,39 +886,21 @@ export default function App() {
                   )}
                 </div>
 
-                {esTecnico ? (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-xs font-medium text-slate-600 mb-1">
-                        Dosis / Cantidad Aplicada
-                      </label>
-                      <input
-                        type="number"
-                        step="any"
-                        required
-                        value={nuevoSeg.valor_principal}
-                        onChange={(e) =>
-                          setNuevoSeg({ ...nuevoSeg, valor_principal: e.target.value })
-                        }
-                        placeholder="Ej. 5 (ml / dosis)"
-                        className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-slate-600 mb-1">
-                        Medicamento / Tratamiento Aplicado
-                      </label>
-                      <input
-                        type="text"
-                        required
-                        value={nuevoSeg.observaciones}
-                        onChange={(e) =>
-                          setNuevoSeg({ ...nuevoSeg, observaciones: e.target.value })
-                        }
-                        placeholder="Ej. Ivermectina / Vacuna aftosa"
-                        className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
-                      />
-                    </div>
+                {esFormularioSanidad ? (
+                  <div>
+                    <label className="block text-xs font-medium text-slate-600 mb-1">
+                      Medicamento / Tratamiento Aplicado y Observaciones
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={nuevoSeg.observaciones}
+                      onChange={(e) =>
+                        setNuevoSeg({ ...nuevoSeg, observaciones: e.target.value })
+                      }
+                      placeholder="Ej. Aplicación de Ivermectina / Vacuna aftosa al lote"
+                      className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
+                    />
                   </div>
                 ) : (
                   <>
@@ -996,7 +985,7 @@ export default function App() {
                   type="submit"
                   className="w-full bg-emerald-700 hover:bg-emerald-800 text-white font-semibold py-2 rounded-lg text-sm"
                 >
-                  {esTecnico ? 'Guardar Sanidad / Medicamento' : 'Guardar Registro Diario'}
+                  {esFormularioSanidad ? 'Guardar Sanidad / Medicamento' : 'Guardar Registro Diario'}
                 </button>
               </form>
 
@@ -1262,10 +1251,16 @@ export default function App() {
                           {s.observaciones || '(Sin anotación escrita)'}
                         </p>
                         <p className="text-xs text-slate-500">
-                          Lote: <strong>{s.lote_codigo || s.lote_id}</strong> &bull; {s.tipo_registro}:{' '}
-                          <strong>{s.valor_principal}</strong> &bull; Alimento:{' '}
-                          <strong>{s.alimento_kg} kg</strong> &bull; +{s.ingresos_animales || 0} / -
-                          {s.mortalidad || 0} &bull; Por: {s.autor_nombre || 'Equipo'}
+                          Lote: <strong>{s.lote_codigo || s.lote_id}</strong> &bull;{' '}
+                          <strong>{s.tipo_registro}</strong>
+                          {s.tipo_registro !== 'SANIDAD' && (
+                            <>
+                              : <strong>{s.valor_principal}</strong> &bull; Alimento:{' '}
+                              <strong>{s.alimento_kg} kg</strong> &bull; +{s.ingresos_animales || 0}{' '}
+                              / -{s.mortalidad || 0}
+                            </>
+                          )}{' '}
+                          &bull; Por: {s.autor_nombre || 'Equipo'}
                         </p>
                       </div>
                       <span className="text-xs text-slate-400">{s.fecha_registro}</span>
@@ -1487,32 +1482,33 @@ export default function App() {
               className="bg-slate-50 rounded-xl p-4 border border-slate-200 space-y-3"
             >
               <h3 className="text-sm font-bold text-slate-800">
-                {esTecnico
+                {esFormularioSanidad
                   ? 'Registrar Sanidad / Medicamento en este Lote'
                   : 'Nuevo Registro Diario en este Lote'}
               </h3>
-              {esTecnico ? (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  <input
-                    type="number"
-                    step="any"
-                    required
-                    placeholder="Dosis / Valor aplicado"
-                    value={nuevoSeg.valor_principal}
-                    onChange={(e) =>
-                      setNuevoSeg({ ...nuevoSeg, valor_principal: e.target.value })
-                    }
-                    className="border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs bg-white"
-                  />
+              {esFormularioSanidad ? (
+                <div className="space-y-2">
+                  {!esTecnico && (
+                    <select
+                      value={nuevoSeg.tipo_registro}
+                      onChange={(e) => setNuevoSeg({ ...nuevoSeg, tipo_registro: e.target.value })}
+                      className="w-full border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs bg-white"
+                    >
+                      <option value="PESO_KG">Peso (Kg)</option>
+                      <option value="LECHE_LITROS">Leche (L)</option>
+                      <option value="HUEVOS">Huevos</option>
+                      <option value="SANIDAD">Sanidad / Medicamento</option>
+                    </select>
+                  )}
                   <input
                     type="text"
                     required
-                    placeholder="Medicamento y observaciones"
+                    placeholder="Medicamento aplicado y observaciones"
                     value={nuevoSeg.observaciones}
                     onChange={(e) =>
                       setNuevoSeg({ ...nuevoSeg, observaciones: e.target.value })
                     }
-                    className="border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs bg-white"
+                    className="w-full border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs bg-white"
                   />
                 </div>
               ) : (
@@ -1526,7 +1522,7 @@ export default function App() {
                       <option value="PESO_KG">Peso (Kg)</option>
                       <option value="LECHE_LITROS">Leche (L)</option>
                       <option value="HUEVOS">Huevos</option>
-                      {esAdmin && <option value="SANIDAD">Sanidad</option>}
+                      {esAdmin && <option value="SANIDAD">Sanidad / Medicamento</option>}
                     </select>
                     <input
                       type="number"
@@ -1593,8 +1589,14 @@ export default function App() {
                   >
                     <div>
                       <p className="font-semibold text-slate-800">
-                        {s.tipo_registro}: {s.valor_principal} &bull; +{s.ingresos_animales || 0} / -
-                        {s.mortalidad || 0} &bull; Alim: {s.alimento_kg || 0} kg
+                        {s.tipo_registro === 'SANIDAD' ? (
+                          'SANIDAD / MEDICAMENTO'
+                        ) : (
+                          <>
+                            {s.tipo_registro}: {s.valor_principal} &bull; +{s.ingresos_animales || 0}{' '}
+                            / -{s.mortalidad || 0} &bull; Alim: {s.alimento_kg || 0} kg
+                          </>
+                        )}
                       </p>
                       {s.observaciones && (
                         <p className="text-slate-600 mt-0.5">{s.observaciones}</p>
