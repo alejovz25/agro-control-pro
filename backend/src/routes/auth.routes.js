@@ -3,10 +3,9 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
 const db = require('../config/db');
-const { verificarAcceso } = require('../middlewares/auth');
+const { verificarAcceso, JWT_SECRET } = require('../middlewares/auth');
 
 const router = express.Router();
-const JWT_SECRET = process.env.JWT_SECRET || 'agrocontrol_dev_secret';
 
 function firmarToken(usuario) {
   return jwt.sign(
@@ -18,7 +17,7 @@ function firmarToken(usuario) {
       rol: usuario.rol
     },
     JWT_SECRET,
-    { expiresIn: '7d' }
+    { expiresIn: '30d' }
   );
 }
 
@@ -77,29 +76,18 @@ router.post('/register-empresa', async (req, res) => {
     const empresa = empresaRes.rows[0];
     const token = firmarToken(usuario);
 
-    return res.status(201).json({
-      token,
-      usuario,
-      empresa
-    });
+    return res.status(201).json({ token, usuario, empresa });
   } catch (error) {
-    if (client) {
-      await client.query('ROLLBACK').catch(() => {});
-    }
+    if (client) await client.query('ROLLBACK').catch(() => {});
     console.error('Error en /register-empresa:', error);
-    return res.status(500).json({
-      error: error.detail || error.message || 'Error al registrar la empresa'
-    });
+    return res.status(500).json({ error: error.detail || error.message || 'Error al registrar la empresa' });
   } finally {
-    if (client) {
-      client.release();
-    }
+    if (client) client.release();
   }
 });
 
 router.post('/login', async (req, res) => {
   const { email, password } = req.body;
-
   if (!email || !password) {
     return res.status(400).json({ error: 'Correo y contraseña requeridos' });
   }
@@ -147,7 +135,6 @@ router.post('/usuarios', verificarAcceso(['ADMIN']), async (req, res) => {
   if (!nombre || !email || !password) {
     return res.status(400).json({ error: 'Nombre, correo y contraseña son obligatorios' });
   }
-
   if (!rolesPermitidos.includes(rol)) {
     return res.status(400).json({ error: 'Rol inválido' });
   }
