@@ -1,57 +1,76 @@
 import * as XLSX from 'xlsx';
 
-export function exportarReporteContableExcel(empresaNombre, lotes, gastos, seguimientos) {
+export function exportarReporteContableExcel(
+  nombreArchivo = 'Reporte_AgroControl',
+  lotes = [],
+  movimientos = [],
+  seguimientos = []
+) {
   const wb = XLSX.utils.book_new();
 
-  // Hoja 1: Balance Financiero por Lote
-  const resumenLotes = lotes.map((lote) => {
-    const gastosLote = gastos
-      .filter((g) => g.lote_id === lote.id)
-      .reduce((acc, item) => acc + Number(item.monto || 0), 0);
-    const inversionTotal = Number(lote.costo_compra_total || 0) + gastosLote;
-    const utilidad = Number(lote.valor_venta_total || 0) - inversionTotal;
-
+  const resumenLotes = lotes.map((l) => {
+    const compra = Number(l.costo_compra_total || 0);
+    const venta = Number(l.valor_venta_total || 0);
+    const pesoIni = Number(l.peso_inicial_kg || 0);
+    const pesoFin = Number(l.peso_final_kg || 0);
     return {
-      'Código Lote': lote.codigo,
-      Nombre: lote.nombre,
-      Especie: lote.especie,
-      'Animales Actuales': Number(lote.cantidad_actual || 0),
-      'Compra Inicial ($)': Number(lote.costo_compra_total || 0),
-      'Gastos Producción ($)': gastosLote,
-      'Inversión Acumulada ($)': inversionTotal,
-      'Ventas Registradas ($)': Number(lote.valor_venta_total || 0),
-      'Balance Neto ($)': utilidad,
-      Estado: lote.estado
+      Codigo: l.codigo,
+      Nombre: l.nombre,
+      Especie: l.especie,
+      Cantidad_Inicial: Number(l.cantidad_inicial || 0),
+      Cantidad_Actual: Number(l.cantidad_actual ?? l.cantidad_inicial ?? 0),
+      Peso_Inicial_Kg: pesoIni,
+      Peso_Final_Kg: pesoFin,
+      Ganancia_Peso_Kg: Number((pesoFin - pesoIni).toFixed(2)),
+      Valor_Compra: compra,
+      Valor_Venta: venta,
+      Margen_Lote: Number((venta - compra).toFixed(2)),
+      Estado: l.estado || 'ACTIVO',
+      Fecha_Inicio: l.fecha_inicio
     };
   });
-  const wsResumen = XLSX.utils.json_to_sheet(resumenLotes);
-  XLSX.utils.book_append_sheet(wb, wsResumen, 'Balance por Lote');
 
-  // Hoja 2: Detalle de Gastos y Facturas
-  const detalleGastos = gastos.map((g) => ({
-    Fecha: g.fecha,
-    'Lote ID': g.lote_id || 'General',
-    Categoría: g.categoria,
-    Descripción: g.descripcion,
-    'Monto ($)': Number(g.monto || 0),
-    'Soporte / Factura': g.nombre_archivo || g.url_factura || 'Sin adjunto'
+  XLSX.utils.book_append_sheet(
+    wb,
+    XLSX.utils.json_to_sheet(resumenLotes.length ? resumenLotes : [{ Nota: 'Sin lotes' }]),
+    'Lotes_y_Carnicos'
+  );
+
+  const hojaFinanzas = movimientos.map((m) => ({
+    Fecha: m.fecha,
+    Tipo: m.tipo || 'GASTO',
+    Categoria: m.categoria,
+    Descripcion: m.descripcion,
+    Lote_Codigo: m.lote_codigo || '',
+    Monto: Number(m.monto || 0),
+    Factura: m.url_factura || ''
   }));
-  const wsGastos = XLSX.utils.json_to_sheet(detalleGastos);
-  XLSX.utils.book_append_sheet(wb, wsGastos, 'Gastos y Facturas');
 
-  // Hoja 3: Historial Productivo (Leche, Peso, Huevos)
-  const historialProd = seguimientos.map((s) => ({
+  XLSX.utils.book_append_sheet(
+    wb,
+    XLSX.utils.json_to_sheet(
+      hojaFinanzas.length ? hojaFinanzas : [{ Nota: 'Sin movimientos financieros' }]
+    ),
+    'Movimientos_Financieros'
+  );
+
+  const hojaSeg = seguimientos.map((s) => ({
     Fecha: s.fecha_registro,
-    'Lote ID': s.lote_id,
-    'Tipo Control': s.tipo_registro,
-    'Valor Registrado': Number(s.valor_principal || 0),
-    'Alimento (kg)': Number(s.alimento_kg || 0),
+    Lote_Codigo: s.lote_codigo || s.lote_id || '',
+    Responsable: s.autor_nombre || '',
+    Tipo_Control: s.tipo_registro,
+    Valor: Number(s.valor_principal || 0),
+    Alimento_Kg: Number(s.alimento_kg || 0),
+    Ingresos_Animales: Number(s.ingresos_animales || 0),
     Mortalidad: Number(s.mortalidad || 0),
     Observaciones: s.observaciones || ''
   }));
-  const wsProd = XLSX.utils.json_to_sheet(historialProd);
-  XLSX.utils.book_append_sheet(wb, wsProd, 'Historial Producción');
 
-  const nombreLimpio = (empresaNombre || 'AgroControl').replace(/\s+/g, '_');
-  XLSX.writeFile(wb, `Reporte_Contable_${nombreLimpio}.xlsx`);
+  XLSX.utils.book_append_sheet(
+    wb,
+    XLSX.utils.json_to_sheet(hojaSeg.length ? hojaSeg : [{ Nota: 'Sin seguimientos' }]),
+    'Seguimientos_y_Notas'
+  );
+
+  XLSX.writeFile(wb, `${nombreArchivo}.xlsx`);
 }
