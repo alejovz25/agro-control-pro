@@ -2,7 +2,7 @@ const express = require('express');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
-const { v4: uuidv4 } = require('uuid');
+const { v4: uuidv4, validate: isUuid } = require('uuid');
 const db = require('../config/db');
 const { verificarAcceso } = require('../middlewares/auth');
 
@@ -50,7 +50,6 @@ router.get('/gastos', verificarAcceso(['ADMIN', 'TECNICO']), async (req, res) =>
   }
 });
 
-// Registrar movimiento financiero (GASTO, COMPRA o VENTA) + descontar animales vendidos y actualizar peso final
 router.post('/gastos', verificarAcceso(['ADMIN']), upload.single('factura'), async (req, res) => {
   const {
     id,
@@ -68,7 +67,7 @@ router.post('/gastos', verificarAcceso(['ADMIN']), upload.single('factura'), asy
     return res.status(400).json({ error: 'Descripción y monto son obligatorios' });
   }
 
-  const movId = id || uuidv4();
+  const movId = id && isUuid(id) ? id : uuidv4();
   const tipoNormalizado = ['GASTO', 'COMPRA', 'VENTA'].includes(String(tipo).toUpperCase())
     ? String(tipo).toUpperCase()
     : 'GASTO';
@@ -162,7 +161,7 @@ router.post('/gastos', verificarAcceso(['ADMIN']), upload.single('factura'), asy
         VALUES ($1,$2,$3,$4,$5,'VENTA_ANIMAL',$6,0,0,0,$7,$8)
         ON CONFLICT (id) DO NOTHING`,
         [
-          `seg-venta-${movId}`,
+          uuidv4(),
           req.usuario.empresa_id,
           lote_id,
           req.usuario.id,
@@ -199,7 +198,8 @@ router.post('/sync', verificarAcceso(['ADMIN']), async (req, res) => {
     await client.query('BEGIN');
 
     for (const m of lista) {
-      if (!m?.id) continue;
+      if (!m) continue;
+      const movId = m.id && isUuid(m.id) ? m.id : uuidv4();
       const tipoNormalizado = ['GASTO', 'COMPRA', 'VENTA'].includes(String(m.tipo || '').toUpperCase())
         ? String(m.tipo).toUpperCase()
         : 'GASTO';
@@ -215,7 +215,7 @@ router.post('/sync', verificarAcceso(['ADMIN']), async (req, res) => {
         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
         ON CONFLICT (id) DO NOTHING`,
         [
-          m.id,
+          movId,
           req.usuario.empresa_id,
           m.lote_id || null,
           tipoNormalizado,
