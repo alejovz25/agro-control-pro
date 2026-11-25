@@ -35,7 +35,7 @@ router.get('/seguimientos', verificarAcceso(['ADMIN', 'TECNICO', 'OPERARIO']), a
   }
 });
 
-// Crear lote con peso inicial por animal y compra inicial
+// Crear lote con peso inicial por animal y compra inicial (ID UUID válido)
 router.post('/', verificarAcceso(['ADMIN']), async (req, res) => {
   const {
     id,
@@ -106,6 +106,7 @@ router.post('/', verificarAcceso(['ADMIN']), async (req, res) => {
     );
 
     if (costoCompra > 0) {
+      const movId = uuidv4();
       await client.query(
         `INSERT INTO movimientos_contables (
           id, empresa_id, lote_id, tipo, categoria, descripcion, cantidad_animales,
@@ -114,7 +115,7 @@ router.post('/', verificarAcceso(['ADMIN']), async (req, res) => {
         VALUES ($1,$2,$3,'COMPRA','COMPRA_LOTE',$4,$5,0,$6,$7,$8)
         ON CONFLICT (id) DO UPDATE SET monto = EXCLUDED.monto`,
         [
-          `compra-${loteId}`,
+          movId,
           req.usuario.empresa_id,
           loteId,
           `Compra lote ${String(codigo).trim()} - ${String(nombre).trim()}`,
