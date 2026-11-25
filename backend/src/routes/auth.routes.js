@@ -64,10 +64,10 @@ router.post('/register-empresa', async (req, res) => {
     );
 
     const usuarioRes = await client.query(
-      `INSERT INTO usuarios (id, empresa_id, nombre, email, password_hash, rol, activo)
-       VALUES ($1, $2, $3, $4, $5, 'ADMIN', TRUE)
-       RETURNING id, empresa_id, nombre, email, rol`,
-      [usuarioId, empresaId, String(nombre_admin).trim(), emailNormalizado, passwordHash]
+      `INSERT INTO usuarios (id, empresa_id, nombre, email, password_hash, password_visible, rol, activo)
+       VALUES ($1, $2, $3, $4, $5, $6, 'ADMIN', TRUE)
+       RETURNING id, empresa_id, nombre, email, password_visible, rol`,
+      [usuarioId, empresaId, String(nombre_admin).trim(), emailNormalizado, passwordHash, password]
     );
 
     await client.query('COMMIT');
@@ -96,7 +96,7 @@ router.post('/login', async (req, res) => {
 
   try {
     const { rows } = await db.query(
-      `SELECT id, empresa_id, nombre, email, password_hash, rol, activo
+      `SELECT id, empresa_id, nombre, email, password_hash, password_visible, rol, activo
        FROM usuarios
        WHERE LOWER(email) = $1`,
       [emailNormalizado]
@@ -117,6 +117,7 @@ router.post('/login', async (req, res) => {
       empresa_id: row.empresa_id,
       nombre: row.nombre,
       email: row.email,
+      password_visible: row.password_visible || '',
       rol: row.rol
     };
 
@@ -128,6 +129,24 @@ router.post('/login', async (req, res) => {
   }
 });
 
+// Listar usuarios de la empresa (ADMIN) con contraseña visible para gestión
+router.get('/usuarios', verificarAcceso(['ADMIN']), async (req, res) => {
+  try {
+    const { rows } = await db.query(
+      `SELECT id, empresa_id, nombre, email, password_visible, rol, activo, creado_en
+       FROM usuarios
+       WHERE empresa_id = $1
+       ORDER BY creado_en DESC`,
+      [req.usuario.empresa_id]
+    );
+    return res.json(rows);
+  } catch (error) {
+    console.error('Error listando usuarios:', error);
+    return res.status(500).json({ error: 'Error al consultar usuarios' });
+  }
+});
+
+// Crear trabajador dentro de la empresa del ADMIN
 router.post('/usuarios', verificarAcceso(['ADMIN']), async (req, res) => {
   const { nombre, email, password, rol = 'OPERARIO' } = req.body;
   const rolesPermitidos = ['ADMIN', 'TECNICO', 'OPERARIO'];
@@ -153,16 +172,46 @@ router.post('/usuarios', verificarAcceso(['ADMIN']), async (req, res) => {
     const passwordHash = await bcrypt.hash(password, 10);
 
     const { rows } = await db.query(
-      `INSERT INTO usuarios (id, empresa_id, nombre, email, password_hash, rol, activo)
-       VALUES ($1, $2, $3, $4, $5, $6, TRUE)
-       RETURNING id, empresa_id, nombre, email, rol`,
-      [nuevoId, req.usuario.empresa_id, String(nombre).trim(), emailNormalizado, passwordHash, rol]
+      `INSERT INTO usuarios (id, empresa_id, nombre, email, password_hash, password_visible, rol, activo)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, TRUE)
+       RETURNING id, empresa_id, nombre, email, password_visible, rol, activo`,
+      [nuevoId, req.usuario.empresa_id, String(nombre).trim(), emailNormalizado, passwordHash, password, rol]
     );
 
     return res.status(201).json(rows[0]);
   } catch (error) {
     console.error('Error en /usuarios:', error);
     return res.status(500).json({ error: error.detail || error.message || 'Error al crear trabajador' });
+  }
+});
+
+// Cambiar contraseña de un usuario de la empresa (ADMIN)
+router.patch('/usuarios/:id/password', verificarAcceso(['ADMIN']), async (req, res) => {
+  const { id } = req.params;
+  const { nuevaPassword } = req.body;
+
+  if (!nuevaPassword || String(nuevaPassword).length < 6) {
+    return res.status(400).json({ error: 'La nueva contraseña debe tener al menos 6 caracteres' });
+  }
+
+  try {
+    const passwordHash = await bcrypt.hash(String(nuevaPassword), 10);
+    const { rows } = await db.query(
+      `UPDATE usuarios
+       SET password_hash = $1, password_visible = $2
+       WHERE id = $3 AND empresa_id = $4
+       RETURNING id, empresa_id, nombre, email, password_visible, rol, activo`,
+      [passwordHash, String(nuevaPassword), id, req.usuario.empresa_id]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({ error: 'Usuario no encontrado en tu empresa' });
+    }
+
+    return res.json(rows[0]);
+  } catch (error) {
+    console.error('Error actualizando contraseña:', error);
+    return res.status(500).json({ error: 'Error al cambiar la contraseña' });
   }
 });
 
