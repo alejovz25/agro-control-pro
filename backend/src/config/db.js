@@ -2,10 +2,6 @@ const { Pool } = require('pg');
 
 const connectionString = process.env.DATABASE_URL;
 
-if (!connectionString) {
-  console.error('ERROR: La variable de entorno DATABASE_URL no está definida.');
-}
-
 const useSsl =
   Boolean(connectionString) &&
   (process.env.NODE_ENV === 'production' ||
@@ -51,6 +47,8 @@ async function inicializarBaseDeDatos() {
       especie VARCHAR(80) NOT NULL,
       cantidad_inicial INTEGER NOT NULL DEFAULT 0,
       cantidad_actual INTEGER NOT NULL DEFAULT 0,
+      peso_inicial_kg NUMERIC(12, 2) NOT NULL DEFAULT 0,
+      peso_final_kg NUMERIC(12, 2) NOT NULL DEFAULT 0,
       costo_compra_total NUMERIC(14, 2) NOT NULL DEFAULT 0,
       valor_venta_total NUMERIC(14, 2) NOT NULL DEFAULT 0,
       fecha_inicio DATE NOT NULL,
@@ -58,24 +56,33 @@ async function inicializarBaseDeDatos() {
       creado_en TIMESTAMP WITH TIME ZONE DEFAULT NOW()
     );
 
+    ALTER TABLE lotes ADD COLUMN IF NOT EXISTS peso_inicial_kg NUMERIC(12, 2) NOT NULL DEFAULT 0;
+    ALTER TABLE lotes ADD COLUMN IF NOT EXISTS peso_final_kg NUMERIC(12, 2) NOT NULL DEFAULT 0;
+
     CREATE TABLE IF NOT EXISTS seguimientos (
       id UUID PRIMARY KEY,
       empresa_id UUID NOT NULL REFERENCES empresas(id) ON DELETE CASCADE,
       lote_id UUID REFERENCES lotes(id) ON DELETE SET NULL,
       usuario_id UUID REFERENCES usuarios(id) ON DELETE SET NULL,
+      autor_nombre VARCHAR(150),
       tipo_registro VARCHAR(50) NOT NULL,
       valor_principal NUMERIC(14, 2) NOT NULL DEFAULT 0,
       alimento_kg NUMERIC(14, 2) NOT NULL DEFAULT 0,
       mortalidad INTEGER NOT NULL DEFAULT 0,
+      ingresos_animales INTEGER NOT NULL DEFAULT 0,
       observaciones TEXT,
       fecha_registro DATE NOT NULL,
       creado_en TIMESTAMP WITH TIME ZONE DEFAULT NOW()
     );
 
+    ALTER TABLE seguimientos ADD COLUMN IF NOT EXISTS autor_nombre VARCHAR(150);
+    ALTER TABLE seguimientos ADD COLUMN IF NOT EXISTS ingresos_animales INTEGER NOT NULL DEFAULT 0;
+
     CREATE TABLE IF NOT EXISTS movimientos_contables (
       id UUID PRIMARY KEY,
       empresa_id UUID NOT NULL REFERENCES empresas(id) ON DELETE CASCADE,
       lote_id UUID REFERENCES lotes(id) ON DELETE SET NULL,
+      tipo VARCHAR(20) NOT NULL DEFAULT 'GASTO',
       categoria VARCHAR(60) NOT NULL,
       descripcion TEXT NOT NULL,
       monto NUMERIC(14, 2) NOT NULL DEFAULT 0,
@@ -84,6 +91,8 @@ async function inicializarBaseDeDatos() {
       creado_por UUID REFERENCES usuarios(id) ON DELETE SET NULL,
       creado_en TIMESTAMP WITH TIME ZONE DEFAULT NOW()
     );
+
+    ALTER TABLE movimientos_contables ADD COLUMN IF NOT EXISTS tipo VARCHAR(20) NOT NULL DEFAULT 'GASTO';
   `;
 
   await pool.query(sql);
