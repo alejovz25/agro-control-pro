@@ -1,25 +1,33 @@
 const jwt = require('jsonwebtoken');
-const JWT_SECRET = process.env.JWT_SECRET || 'clave_secreta_agrocontrol_2026';
 
-// Verifica token y aísla automáticamente los datos por empresa_id
+const JWT_SECRET = process.env.JWT_SECRET || 'agrocontrol_pro_secret_2026';
+
 function verificarAcceso(rolesPermitidos = []) {
   return (req, res, next) => {
-    const token = req.headers.authorization?.split(' ')[1];
-    if (!token) return res.status(401).json({ error: 'Token no proporcionado' });
+    const authHeader = req.headers.authorization || '';
+    const partes = authHeader.split(' ');
+    const token = partes.length === 2 && partes[0] === 'Bearer' ? partes[1] : null;
+
+    if (!token || token === 'sesion_activa') {
+      return res.status(401).json({ error: 'Sesión inválida o expirada' });
+    }
 
     try {
-      const decoded = jwt.verify(token, JWT_SECRET);
-      if (!decoded.activo) {
-        return res.status(403).json({ error: 'Usuario desactivado por el administrador' });
+      const payload = jwt.verify(token, JWT_SECRET);
+      req.usuario = {
+        id: payload.id,
+        empresa_id: payload.empresa_id,
+        nombre: payload.nombre,
+        email: payload.email,
+        rol: String(payload.rol || '').toUpperCase()
+      };
+
+      if (rolesPermitidos.length > 0 && !rolesPermitidos.includes(req.usuario.rol)) {
+        return res.status(403).json({ error: 'No tienes permisos para realizar esta acción' });
       }
 
-      if (rolesPermitidos.length > 0 && !rolesPermitidos.includes(decoded.rol)) {
-        return res.status(403).json({ error: 'No tienes permisos para esta acción' });
-      }
-
-      req.usuario = decoded; // Contiene: id, empresa_id, rol, activo
-      next();
-    } catch (err) {
+      return next();
+    } catch (_err) {
       return res.status(401).json({ error: 'Sesión inválida o expirada' });
     }
   };
